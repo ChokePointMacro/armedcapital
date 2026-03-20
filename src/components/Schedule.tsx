@@ -43,8 +43,8 @@ export const Schedule = () => {
     fetchAll();
   };
 
-  const toggleSchedule = async (id: number, enabled: number) => {
-    await apiFetch(`/api/scheduled-reports/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: enabled ? 0 : 1 }) });
+  const toggleSchedule = async (id: number, enabled: boolean) => {
+    await apiFetch(`/api/scheduled-reports/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !enabled }) });
     fetchAll();
   };
 

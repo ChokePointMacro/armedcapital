@@ -71,15 +71,15 @@ export const Settings = ({ user, onLogout }: { user: UserData | null; onLogout: 
     });
     if (res.ok) {
       const data = await res.json();
-      setSchedules(prev => [...prev, { id: data.id, report_type: newSchedule.type, custom_topic: newSchedule.customTopic || undefined, schedule_time: newSchedule.time, days: newSchedule.days, enabled: 1 }]);
+      setSchedules(prev => [...prev, { id: data.id, report_type: newSchedule.type, custom_topic: newSchedule.customTopic || undefined, schedule_time: newSchedule.time, days: newSchedule.days, enabled: true }]);
       setShowAddSchedule(false);
       setNewSchedule({ type: 'global', customTopic: '', time: '08:00', days: '1,2,3,4,5' });
     }
   };
 
-  const toggleSchedule = async (id: number, enabled: number) => {
+  const toggleSchedule = async (id: number, enabled: boolean) => {
     await apiFetch(`/api/scheduled-reports/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled: !enabled }) });
-    setSchedules(prev => prev.map(s => s.id === id ? { ...s, enabled: enabled ? 0 : 1 } : s));
+    setSchedules(prev => prev.map(s => s.id === id ? { ...s, enabled: !enabled } : s));
   };
 
   const deleteSchedule = async (id: number) => {
