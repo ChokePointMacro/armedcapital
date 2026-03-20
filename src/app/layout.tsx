@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { ClerkProvider } from '@clerk/nextjs';
-import { dark } from '@clerk/themes';
 import { PostHogProvider } from '@/components/PostHogProvider';
 import './globals.css';
 
@@ -15,7 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ClerkProvider appearance={{ baseTheme: dark }}>
+    <ClerkProvider>
       <html lang="en" className="dark">
         <body className="bg-black text-white min-h-screen antialiased">
           <PostHogProvider>
