@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { Menu, X } from 'lucide-react';
 import { CPMLogo } from './CPMLogo';
@@ -27,7 +28,7 @@ const AUTH_NAV_ITEMS = [
 function NavLink({ to, label, active, onClick }: { to: string; label: string; active: boolean; onClick?: () => void }) {
   return (
     <Link
-      to={to}
+      href={to}
       onClick={onClick}
       className={`text-[10px] font-mono uppercase tracking-widest transition-colors ${
         active
@@ -47,14 +48,14 @@ export const Layout = ({ children, user, onLogout, onLogin }: {
   onLogout: () => void;
   onLogin: (u: UserData) => void;
 }) => {
-  const navigate = useNavigate();
-  const location = useLocation();
+  const router = useRouter();
+  const pathname = usePathname();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isActive = (path: string) => {
-    if (path === '/') return location.pathname === '/';
-    return location.pathname.startsWith(path);
+    if (path === '/') return pathname === '/';
+    return pathname.startsWith(path);
   };
 
   const allNavItems = [...NAV_ITEMS, ...(user ? AUTH_NAV_ITEMS : [])];
@@ -65,7 +66,7 @@ export const Layout = ({ children, user, onLogout, onLogin }: {
 
       <header className="sticky top-0 z-40 bg-[#0a0a0a]/95 backdrop-blur-md border-b border-btc-orange/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <button onClick={() => navigate('/')} className="flex items-center gap-2.5 group cursor-pointer">
+          <button onClick={() => router.push('/')} className="flex items-center gap-2.5 group cursor-pointer">
             <CPMLogo size={34} className="group-hover:opacity-80 transition-opacity" />
             <div className="flex flex-col items-start leading-none">
               <span className="text-[11px] font-mono font-bold tracking-[0.25em] uppercase text-white">ChokePoint</span>

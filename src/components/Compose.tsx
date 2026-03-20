@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Twitter, Linkedin, AtSign, MessageSquare, Loader2, Send, Clock, Check, X as XIcon, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
@@ -9,14 +9,14 @@ import { BackButton } from './BackButton';
 import type { UserData, SocialAccount } from '@/types';
 
 export const Compose = ({ user }: { user: UserData | null }) => {
-  const location = useLocation();
-  const [content, setContent] = useState(location.state?.content || '');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [content, setContent] = useState(searchParams.get('content') || '');
   const [loading, setLoading] = useState(false);
   const [platforms, setPlatforms] = useState<string[]>(['x']);
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[]>([]);
   const [postResults, setPostResults] = useState<Record<string, { success: boolean; error?: string }> | null>(null);
   const [copied, setCopied] = useState(false);
-  const navigate = useNavigate();
 
   useEffect(() => {
     apiFetch('/api/social/accounts').then(r => r.ok ? r.json() : { accounts: [] })
@@ -24,11 +24,11 @@ export const Compose = ({ user }: { user: UserData | null }) => {
   }, []);
 
   useEffect(() => {
-    if (location.state?.autoSchedule) {
+    if (searchParams.get('autoSchedule') === 'true') {
       const timer = setTimeout(() => handleSchedule(), 500);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [searchParams]);
 
   const isConnected = (platform: string) =>
     socialAccounts.some(a => a.platform === platform);
@@ -52,7 +52,7 @@ export const Compose = ({ user }: { user: UserData | null }) => {
 
     setPostResults(results);
     const allSuccess = Object.values(results).every((r: any) => r.success);
-    if (allSuccess) setTimeout(() => { setContent(''); navigate('/'); }, 1500);
+    if (allSuccess) setTimeout(() => { setContent(''); router.push('/'); }, 1500);
     setLoading(false);
   };
 
@@ -63,7 +63,7 @@ export const Compose = ({ user }: { user: UserData | null }) => {
     setLoading(true);
     try {
       const res = await apiFetch('/api/schedule-post', { method: 'POST', body: JSON.stringify({ content, scheduledAt: dateStr }) });
-      if (res.ok) { alert("Scheduled successfully!"); navigate('/schedule'); }
+      if (res.ok) { alert("Scheduled successfully!"); router.push('/schedule'); }
     } finally { setLoading(false); }
   };
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
 import { ChevronDown, User, Send, Calendar, Settings as SettingsIcon, LogOut, BarChart2, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -51,16 +51,16 @@ export const Dropdown = ({ user, onLogout }: { user: UserData; onLogout: () => v
             </div>
             <div className="p-1">
               {[
-                { to: '/profile',  icon: <User size={14} />,        label: 'Profile'  },
-                { to: '/markets',  icon: <BarChart2 size={14} />,   label: 'Markets'  },
-                { to: '/reports',  icon: <FileText size={14} />,    label: 'Reports'  },
-                { to: '/compose',  icon: <Send size={14} />,        label: 'Compose'  },
-                { to: '/schedule', icon: <Calendar size={14} />,    label: 'Schedule' },
-                { to: '/settings', icon: <SettingsIcon size={14} />, label: 'Settings' },
-              ].map(({ to, icon, label }) => (
+                { href: '/profile',  icon: <User size={14} />,        label: 'Profile'  },
+                { href: '/markets',  icon: <BarChart2 size={14} />,   label: 'Markets'  },
+                { href: '/reports',  icon: <FileText size={14} />,    label: 'Reports'  },
+                { href: '/compose',  icon: <Send size={14} />,        label: 'Compose'  },
+                { href: '/schedule', icon: <Calendar size={14} />,    label: 'Schedule' },
+                { href: '/settings', icon: <SettingsIcon size={14} />, label: 'Settings' },
+              ].map(({ href, icon, label }) => (
                 <Link
-                  key={to}
-                  to={to}
+                  key={href}
+                  href={href}
                   onClick={() => setIsOpen(false)}
                   className="flex items-center gap-3 px-3 py-2 text-xs font-mono uppercase tracking-widest hover:bg-btc-orange/10 hover:text-btc-orange transition-colors"
                 >

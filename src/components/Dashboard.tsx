@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import {
   FileText, TrendingUp, ExternalLink, Loader2, RefreshCw, Clock,
   ChevronRight, ChevronLeft, Copy, Send, Calendar, Trash2, Instagram,
@@ -93,7 +93,7 @@ export const Dashboard = () => {
   const [newContextContent, setNewContextContent] = useState('');
   const instaAssetRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const navigate = useNavigate();
+  const router = useRouter();
 
   const activeReportRecord = reports.find(r => r.id === activeReportId) ?? null;
   const activeReport = activeReportRecord?.content as (WeeklyReport | ForecastReport) | null;
@@ -346,8 +346,8 @@ export const Dashboard = () => {
     }));
   };
 
-  const handlePost = (text: string) => navigate('/compose', { state: { content: text } });
-  const handleSchedule = (content: string) => navigate('/compose', { state: { content, autoSchedule: true } });
+  const handlePost = (text: string) => router.push(`/compose?content=${encodeURIComponent(text)}`);
+  const handleSchedule = (content: string) => router.push(`/compose?content=${encodeURIComponent(content)}&autoSchedule=true`);
 
   const handleGenerateInstagram = async () => {
     if (!activeReport || !activeReportId) return;
