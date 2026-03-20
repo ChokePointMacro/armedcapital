@@ -17,8 +17,7 @@ export default function ProfilePage() {
 
   return (
     <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>
-      <Profile user={userData} onLogout={() => {}}
-user={userData} />
+      <Profile user={userData} onLogout={() => {}} />
     </Layout>
   );
 }

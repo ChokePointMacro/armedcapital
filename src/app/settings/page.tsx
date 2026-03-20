@@ -17,8 +17,7 @@ export default function SettingsPage() {
 
   return (
     <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>
-      <Settings user={userData} onLogout={() => {}}
-user={userData} />
+      <Settings user={userData} onLogout={() => {}} />
     </Layout>
   );
 }
