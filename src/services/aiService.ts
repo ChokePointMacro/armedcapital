@@ -36,7 +36,7 @@ function getAnthropic() {
 export async function generateReportWithFallback(
   prompt: string,
   providers: Array<"gemini" | "claude" | "gpt"> = ["claude", "gemini", "gpt"],
-  maxTokens = 8000
+  maxTokens = 16000
 ): Promise<AIResponse> {
   const errors: Array<{ provider: string; error: string }> = [];
   const rateLimitErrors: string[] = [];
@@ -145,7 +145,7 @@ async function generateWithGemini(prompt: string): Promise<AIResponse> {
   throw new Error("No available Gemini models");
 }
 
-async function generateWithClaude(prompt: string, maxTokens = 8000): Promise<AIResponse> {
+async function generateWithClaude(prompt: string, maxTokens = 16000): Promise<AIResponse> {
   const client = getAnthropic();
 
   const response = await client.messages.create({

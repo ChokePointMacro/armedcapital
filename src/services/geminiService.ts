@@ -397,7 +397,7 @@ const REPORT_CONFIGS: Record<string, ReportConfig> = {
     timeframe: "last 7 days",
     timeframeDescriptor: "from the last 7 days",
     sentimentVocab: "escalating | stable | de-escalating",
-    maxTokens: 8000,
+    maxTokens: 16000,
   },
   crypto: {
     topicFocus: "Cryptocurrency industry ONLY. Focus on Bitcoin, Ethereum, Altcoins, DeFi, Blockchain technology, NFTs, GameFi, Crypto regulation, exchange developments, and significant Web3 industry events. Omit non-crypto news.",
@@ -405,7 +405,7 @@ const REPORT_CONFIGS: Record<string, ReportConfig> = {
     timeframe: "last 7 days",
     timeframeDescriptor: "from the last 7 days",
     sentimentVocab: "bullish | bearish | neutral",
-    maxTokens: 8000,
+    maxTokens: 16000,
   },
   equities: {
     topicFocus: "S&P 500 Equities ONLY. Focus on the top 500 US stocks, significant news, earnings results, and price movements for companies within the S&P 500. Omit all other macro news, geopolitics, or non-S&P 500 stocks.",
@@ -413,7 +413,7 @@ const REPORT_CONFIGS: Record<string, ReportConfig> = {
     timeframe: "last 7 days",
     timeframeDescriptor: "from the last 7 days",
     sentimentVocab: "bullish | bearish | neutral",
-    maxTokens: 8000,
+    maxTokens: 16000,
   },
   nasdaq: {
     topicFocus: "Nasdaq-100 tech and growth stocks ONLY. Focus on AAPL, NVDA, MSFT, META, AMZN, GOOGL, TSLA and other Nasdaq-100 constituents. Emphasise: AI/product announcements, earnings beats/misses, analyst upgrades/downgrades, rate-sensitive growth stock moves, and sector-wide tech themes. Omit S&P 500 non-tech names and macro news unless it directly moves Nasdaq prices.",
@@ -421,7 +421,7 @@ const REPORT_CONFIGS: Record<string, ReportConfig> = {
     timeframe: "last 7 days",
     timeframeDescriptor: "from the last 7 days",
     sentimentVocab: "bullish | bearish | neutral",
-    maxTokens: 8000,
+    maxTokens: 16000,
   },
   conspiracies: {
     topicFocus: "Widely viral, unverified or actively contested claims circulating on X (Twitter), TikTok, Facebook, Reddit, and Google. Focus on topics that are heavily discussed in mainstream social media but lack confirmation from established news sources — stories that are disputed, fact-checked as false, or still under investigation. Include historical context from the last 20 years where relevant, but prioritize what is trending in the last 30 days.",
@@ -429,7 +429,7 @@ const REPORT_CONFIGS: Record<string, ReportConfig> = {
     timeframe: "last 30 days (with 20-year historical context)",
     timeframeDescriptor: "from the last 30 days",
     sentimentVocab: "viral | fading | debunked",
-    maxTokens: 9000,
+    maxTokens: 16000,
     isConspiracy: true,
   },
   china: {
@@ -438,7 +438,7 @@ const REPORT_CONFIGS: Record<string, ReportConfig> = {
     timeframe: "last 90 days with 30-day forward outlook",
     timeframeDescriptor: "from the last 90 days, with forward-looking risk and opportunity analysis for the next 30 days",
     sentimentVocab: "critical | escalating | opportunity | bullish | bearish | risk-off | stable | de-escalating",
-    maxTokens: 10000,
+    maxTokens: 16000,
   },
 };
 
@@ -641,7 +641,7 @@ export async function generateWeeklyReport(type: string = 'global', customTopic?
         timeframe: "last 90 days with 30-day forward outlook",
         timeframeDescriptor: "from the last 90 days, with forward-looking risk analysis for the next 30 days",
         sentimentVocab: "bullish | bearish | neutral | escalating | stable | de-escalating | critical | opportunity",
-        maxTokens: 10000,
+        maxTokens: 16000,
       }
     : (REPORT_CONFIGS[type] ?? REPORT_CONFIGS.global);
 
