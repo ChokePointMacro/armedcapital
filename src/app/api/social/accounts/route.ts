@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
       connectedAt: account.updated_at,
     }));
 
-    return NextResponse.json(formattedAccounts);
+    return NextResponse.json({ accounts: formattedAccounts });
   } catch (error) {
     console.error('[API] Error in GET /api/social/accounts:', error);
     return NextResponse.json(

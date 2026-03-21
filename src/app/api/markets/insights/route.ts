@@ -32,16 +32,22 @@ const YAHOO_MAP: Record<string, string> = {
 let insightsCache: { text: string; ts: number } | null = null;
 const INSIGHTS_TTL = 10 * 60 * 1000; // 10 minutes
 
+let cachedToken: string | null = null;
+let tokenExpiry = 0;
+
 async function getPublicToken(): Promise<string> {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
   try {
-    const res = await fetch('https://api.public.com/userapigateway/session/init', {
+    const res = await fetch('https://api.public.com/userapiauthservice/personal/access-tokens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerId: process.env.PUBLIC_CUSTOMER_ID }),
+      body: JSON.stringify({ validityInMinutes: 60, secret: process.env.PUBLIC_SECRET_KEY }),
     });
-    if (!res.ok) throw new Error(`Failed to get Public.com token: ${res.status}`);
+    if (!res.ok) throw new Error(`Public.com token exchange failed ${res.status}`);
     const data = await res.json() as any;
-    return data.sessionToken || '';
+    cachedToken = data.accessToken;
+    tokenExpiry = Date.now() + 55 * 60 * 1000;
+    return cachedToken!;
   } catch (error) {
     console.error('Error getting Public token:', error);
     return '';
