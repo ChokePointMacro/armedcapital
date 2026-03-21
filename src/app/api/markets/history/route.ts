@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const YAHOO_MAP: Record<string, string> = {
   BTC: 'BTC-USD',
+  ETH: 'ETH-USD',
   SPX: '^GSPC',
   NDX: '^NDX',
   MSTR: 'MSTR',
@@ -79,22 +80,31 @@ async function fetchYahooCandles(
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const symbols = searchParams.get('symbols')?.split(',').map(s => s.trim().toUpperCase()) || [];
     const range = (searchParams.get('range') || '1m').toLowerCase();
+    const { interval, range: yahooRange } = yahooParams(range);
 
-    if (!symbols.length) {
-      return NextResponse.json(
-        { error: 'symbols query parameter is required' },
-        { status: 400 }
-      );
+    // Single-symbol mode: ?symbol=BTC
+    const singleSymbol = (searchParams.get('symbol') || '').toUpperCase();
+    if (singleSymbol) {
+      const yahooSym = YAHOO_MAP[singleSymbol] || singleSymbol;
+      try {
+        const { candles, pivotLevels } = await fetchYahooCandles(yahooSym, interval, yahooRange);
+        return NextResponse.json({ symbol: singleSymbol, candles, pivotLevels });
+      } catch {
+        return NextResponse.json({ symbol: singleSymbol, candles: [], pivotLevels: null });
+      }
     }
 
-    const { interval, range: yahooRange } = yahooParams(range);
+    // Multi-symbol mode: ?symbols=BTC,ETH or no param (fetch all)
+    const symbolsParam = searchParams.get('symbols');
+    const symbols = symbolsParam
+      ? symbolsParam.split(',').map(s => s.trim().toUpperCase())
+      : Object.keys(YAHOO_MAP);
 
     const results = await Promise.all(
       symbols.map(async sym => {
         try {
-          let yahooSym = YAHOO_MAP[sym] || sym;
+          const yahooSym = YAHOO_MAP[sym] || sym;
           const { candles, pivotLevels } = await fetchYahooCandles(yahooSym, interval, yahooRange);
           return { symbol: sym, candles, pivotLevels };
         } catch {
