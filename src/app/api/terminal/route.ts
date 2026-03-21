@@ -79,6 +79,13 @@ async function buildTerminalData() {
       { name: 'Financials', symbol: 'XLF', change: 1.85 },
       { name: 'Healthcare', symbol: 'XLV', change: 1.2 },
     ],
+    scoringWeights: {
+      volatility: { weight: 19, label: '+19' },
+      momentum: { weight: 15, label: '+15' },
+      trend: { weight: 16, label: '+16' },
+      breadth: { weight: 14, label: '+14' },
+      macro: { weight: 8, label: '+8' },
+    },
     updatedAt: new Date().toISOString(),
   };
 }
