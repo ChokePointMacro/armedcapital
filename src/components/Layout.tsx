@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { Menu, X } from 'lucide-react';
+import { SignInButton, useClerk } from '@clerk/nextjs';
 import { CPMLogo } from './CPMLogo';
 import { Dropdown } from './Dropdown';
-import { AuthModal } from './AuthModal';
 import MatrixBackground from './MatrixBackground';
 import type { UserData } from '@/types';
 
@@ -46,13 +46,18 @@ function NavLink({ to, label, active, onClick }: { to: string; label: string; ac
 export const Layout = ({ children, user, onLogout, onLogin }: {
   children: React.ReactNode;
   user: UserData | null;
-  onLogout: () => void;
-  onLogin: (u: UserData) => void;
+  onLogout?: () => void;
+  onLogin?: (u: UserData) => void;
 }) => {
   const router = useRouter();
   const pathname = usePathname();
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const { signOut } = useClerk();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const handleLogout = () => {
+    signOut({ redirectUrl: '/' });
+    onLogout?.();
+  };
 
   const isActive = (path: string) => {
     if (path === '/') return pathname === '/';
@@ -92,14 +97,15 @@ export const Layout = ({ children, user, onLogout, onLogin }: {
             </button>
 
             {user ? (
-              <Dropdown user={user} onLogout={onLogout} />
+              <Dropdown user={user} onLogout={handleLogout} />
             ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-btc-orange text-black text-xs font-mono font-bold uppercase tracking-widest hover:opacity-90 transition-opacity shadow-[0_0_10px_rgba(247,147,26,0.3)]"
-              >
-                Sign In
-              </button>
+              <SignInButton mode="redirect">
+                <button
+                  className="flex items-center gap-2 px-4 py-2 bg-btc-orange text-black text-xs font-mono font-bold uppercase tracking-widest hover:opacity-90 transition-opacity shadow-[0_0_10px_rgba(247,147,26,0.3)]"
+                >
+                  Sign In
+                </button>
+              </SignInButton>
             )}
           </div>
         </div>
@@ -129,12 +135,6 @@ export const Layout = ({ children, user, onLogout, onLogin }: {
           )}
         </AnimatePresence>
       </header>
-
-      <AnimatePresence>
-        {showAuthModal && (
-          <AuthModal onClose={() => setShowAuthModal(false)} onSuccess={(u) => { onLogin(u); setShowAuthModal(false); }} />
-        )}
-      </AnimatePresence>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative z-10">
         {children}
