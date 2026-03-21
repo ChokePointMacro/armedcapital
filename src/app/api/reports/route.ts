@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { getReports, saveReport, deleteAllReports } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
+    await safeAuth();
 
     const reports = await getReports(50);
 
@@ -32,14 +25,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
+    await safeAuth();
 
     const { id, type, content, customTopic } = await request.json();
 
@@ -69,14 +55,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
+    await safeAuth();
 
     console.log('Clearing all reports...');
     await deleteAllReports();

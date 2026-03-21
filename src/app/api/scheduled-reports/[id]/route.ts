@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { updateScheduledReport, deleteScheduledReport } from '@/lib/db';
 
 export async function PATCH(
@@ -7,7 +7,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(
@@ -52,7 +52,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(

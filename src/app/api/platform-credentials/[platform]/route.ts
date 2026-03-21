@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { createServerSupabase } from '@/lib/supabase';
 
 const PLATFORM_KEYS: Record<string, string[]> = {
@@ -10,7 +10,7 @@ const PLATFORM_KEYS: Record<string, string[]> = {
 };
 
 export async function POST(request: NextRequest, { params }: { params: { platform: string } }) {
-  const { userId } = await auth();
+  const userId = await safeAuth();
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   const { platform } = params;
   if (!PLATFORM_KEYS[platform]) return NextResponse.json({ error: 'Unknown platform' }, { status: 400 });
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: { platfor
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: { platform: string } }) {
-  const { userId } = await auth();
+  const userId = await safeAuth();
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   const { platform } = params;
   if (!PLATFORM_KEYS[platform]) return NextResponse.json({ error: 'Unknown platform' }, { status: 400 });

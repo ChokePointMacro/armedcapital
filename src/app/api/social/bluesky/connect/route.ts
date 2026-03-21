@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { createServerSupabase } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
-  const { userId } = await auth();
+  const userId = await safeAuth();
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   const { identifier, appPassword } = await request.json();
   if (!identifier || !appPassword) return NextResponse.json({ error: 'identifier and appPassword required' }, { status: 400 });

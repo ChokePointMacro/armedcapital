@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import nodemailer from 'nodemailer';
 
 function escapeHtml(str: string): string {
@@ -13,7 +13,7 @@ function escapeHtml(str: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(

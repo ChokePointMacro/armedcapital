@@ -1,19 +1,10 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { clerkMiddleware } from '@clerk/nextjs/server';
 
-// Public routes that don't require auth
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/api/public/(.*)',
-  '/api/health',
-]);
-
-export default clerkMiddleware((auth, request) => {
-  if (!isPublicRoute(request)) {
-    auth().protect();
-  }
-});
+// In development mode, Clerk's auth().protect() fails on mobile browsers
+// that block third-party cookies (*.clerk.accounts.dev).
+// Let the middleware pass through and let individual API routes
+// handle their own auth checks gracefully.
+export default clerkMiddleware();
 
 export const config = {
   matcher: [

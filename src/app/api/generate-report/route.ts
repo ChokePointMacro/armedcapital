@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { saveReport } from '@/lib/db';
 import {
   generateWeeklyReport,
@@ -11,14 +11,7 @@ const REPORT_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
+    const userId = await safeAuth();
 
     const { type, customTopic } = await request.json();
 

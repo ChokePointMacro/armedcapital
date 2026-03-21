@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { getContextFile, upsertContextFile, deleteContextFile } from '@/lib/db';
 
 export async function GET(
@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ name: string }> }
 ) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(
@@ -42,7 +42,7 @@ export async function PATCH(
   { params }: { params: Promise<{ name: string }> }
 ) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(
@@ -77,7 +77,7 @@ export async function DELETE(
   { params }: { params: Promise<{ name: string }> }
 ) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(

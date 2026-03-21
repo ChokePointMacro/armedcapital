@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { getPlatformCredential, createPendingAuth } from '@/lib/db';
 import crypto from 'crypto';
 
@@ -24,7 +24,7 @@ export async function GET(
   { params }: { params: { platform: string } }
 ) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(

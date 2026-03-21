@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { createServerSupabase } from '@/lib/supabase';
 import OpenAI from 'openai';
 
 export async function POST(request: NextRequest) {
-  const { userId } = await auth();
+  const userId = await safeAuth();
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   const { reportId } = await request.json();
   const db = createServerSupabase();

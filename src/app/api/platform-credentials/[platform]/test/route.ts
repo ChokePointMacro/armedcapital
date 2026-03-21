@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { createServerSupabase } from '@/lib/supabase';
 
 export async function GET(request: NextRequest, { params }: { params: { platform: string } }) {
-  const { userId } = await auth();
+  const userId = await safeAuth();
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   const { platform } = params;
   const db = createServerSupabase();

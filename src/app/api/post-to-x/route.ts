@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/authHelper';
 import { getPlatformToken } from '@/lib/db';
 import { TwitterApi } from 'twitter-api-v2';
 
@@ -47,7 +47,7 @@ async function refreshXToken(tokenRecord: any): Promise<any | null> {
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
+    const userId = await safeAuth();
 
     if (!userId) {
       return NextResponse.json(
