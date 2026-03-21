@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { to: '/automated', label: 'Automated' },
   { to: '/terminal', label: 'Terminal' },
   { to: '/trade-flow', label: 'Trade Flow' },
+  { to: '/usage', label: 'Usage' },
 ];
 
 const AUTH_NAV_ITEMS = [
