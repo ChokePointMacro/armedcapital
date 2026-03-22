@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
 import { fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, fetchFinnhubData } from '@/lib/enrichedData';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 // ── Known rate limits per service ────────────────────────────────────────────
 
 interface ServiceStatus {

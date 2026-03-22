@@ -4,6 +4,8 @@ import {
   fredToPromptBlock, fearGreedToPromptBlock, finnhubToPromptBlock,
 } from '@/lib/enrichedData';
 
+export const dynamic = 'force-dynamic';
+
 const TERMINAL_ANALYSIS_TTL = 10 * 60 * 1000; // 10 minutes
 const TERMINAL_TTL = 5 * 60 * 1000;
 

@@ -4,6 +4,8 @@ import {
   fredToPromptBlock, fearGreedToPromptBlock, coinGeckoToPromptBlock, finnhubToPromptBlock,
 } from '@/lib/enrichedData';
 
+export const dynamic = 'force-dynamic';
+
 const MARKET_INSTRUMENTS = [
   { symbol: 'BTC', name: 'Bitcoin', type: 'CRYPTO', isCrypto: true },
   { symbol: 'ETH', name: 'Ethereum', type: 'CRYPTO', isCrypto: true },

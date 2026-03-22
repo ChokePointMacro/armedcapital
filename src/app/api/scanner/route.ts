@@ -5,6 +5,10 @@ import {
   fetchAllEnrichedData, enrichedDataToPromptBlock,
 } from '@/lib/enrichedData';
 
+// Force dynamic rendering — this route fetches many external APIs at runtime
+export const dynamic = 'force-dynamic';
+export const maxDuration = 120; // Allow up to 120s for all enrichment fetches + AI call
+
 // ── Cache ────────────────────────────────────────────────────────────────────
 
 interface CacheEntry { data: any; ts: number }

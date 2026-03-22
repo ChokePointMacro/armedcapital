@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, type FredData, type FearGreedData, type CoinGeckoData } from '@/lib/enrichedData';
 
+export const dynamic = 'force-dynamic';
+
 const TERMINAL_TTL = 5 * 60 * 1000; // 5 minutes
 
 let terminalCache: { data: any; ts: number } | null = null;
