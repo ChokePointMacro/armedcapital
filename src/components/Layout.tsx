@@ -25,6 +25,7 @@ const NAV_ITEMS = [
   { to: '/org', label: 'Org' },
   { to: '/traffic', label: 'Traffic' },
   { to: '/audit', label: 'Audit' },
+  { to: '/billing', label: 'Billing' },
 ];
 
 const AUTH_NAV_ITEMS = [
