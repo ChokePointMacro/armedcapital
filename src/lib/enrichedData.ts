@@ -444,6 +444,356 @@ Trending Coins (social momentum):
 ${cg.trending.map(t => `- ${t.symbol} (${t.name}) — rank #${t.marketCapRank || 'N/A'}`).join(', ')}`;
 }
 
+// ── BLS (Bureau of Labor Statistics) ─────────────────────────────────────────
+
+export interface BlsData {
+  cpiAllItems: number | null;
+  cpiYoY: number | null;
+  ppiAllCommodities: number | null;
+  nonfarmPayrolls: number | null;
+  unemploymentRate: number | null;
+  averageHourlyEarnings: number | null;
+  available: boolean;
+}
+
+let blsCache: { data: BlsData; ts: number } | null = null;
+const BLS_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours (BLS updates monthly)
+
+async function fetchBlsSeries(seriesIds: string[]): Promise<Record<string, number | null>> {
+  const result: Record<string, number | null> = {};
+  seriesIds.forEach(id => { result[id] = null; });
+
+  try {
+    const currentYear = new Date().getFullYear();
+    const url = 'https://api.bls.gov/publicAPI/v2/timeseries/data/';
+    const body = {
+      seriesid: seriesIds,
+      startyear: String(currentYear - 1),
+      endyear: String(currentYear),
+      latest: true,
+    };
+    const apiKey = process.env.BLS_API_KEY;
+    if (apiKey) {
+      (body as any).registrationkey = apiKey;
+    }
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return result;
+    const json = await res.json();
+    if (json.status === 'REQUEST_SUCCEEDED' && json.Results?.series) {
+      for (const s of json.Results.series) {
+        const latest = s.data?.[0];
+        if (latest?.value) {
+          result[s.seriesID] = parseFloat(latest.value);
+        }
+      }
+    }
+  } catch { /* silent */ }
+  return result;
+}
+
+export async function fetchBlsData(): Promise<BlsData> {
+  if (blsCache && Date.now() - blsCache.ts < BLS_CACHE_TTL) return blsCache.data;
+
+  // BLS Series IDs:
+  // CUSR0000SA0 = CPI All Items (Urban)
+  // WPUFD49104 = PPI All Commodities
+  // CES0000000001 = Total Nonfarm Payrolls (thousands)
+  // LNS14000000 = Unemployment Rate
+  // CES0500000003 = Average Hourly Earnings
+  const seriesIds = ['CUSR0000SA0', 'WPUFD49104', 'CES0000000001', 'LNS14000000', 'CES0500000003'];
+  const vals = await fetchBlsSeries(seriesIds);
+
+  const data: BlsData = {
+    cpiAllItems: vals['CUSR0000SA0'],
+    cpiYoY: null, // calculated from multiple periods, skip for now
+    ppiAllCommodities: vals['WPUFD49104'],
+    nonfarmPayrolls: vals['CES0000000001'],
+    unemploymentRate: vals['LNS14000000'],
+    averageHourlyEarnings: vals['CES0500000003'],
+    available: Object.values(vals).some(v => v !== null),
+  };
+
+  blsCache = { data, ts: Date.now() };
+  return data;
+}
+
+export function blsToPromptBlock(bls: BlsData): string {
+  if (!bls.available) return 'BLS DATA: Unavailable';
+  return `BLS LABOR & INFLATION DATA:
+- CPI All Items (index): ${bls.cpiAllItems?.toFixed(1) ?? 'N/A'}
+- PPI All Commodities (index): ${bls.ppiAllCommodities?.toFixed(1) ?? 'N/A'}
+- Nonfarm Payrolls: ${bls.nonfarmPayrolls ? (bls.nonfarmPayrolls).toLocaleString() + 'K' : 'N/A'}
+- Unemployment Rate: ${bls.unemploymentRate ? bls.unemploymentRate.toFixed(1) + '%' : 'N/A'}
+- Avg Hourly Earnings: ${bls.averageHourlyEarnings ? '$' + bls.averageHourlyEarnings.toFixed(2) : 'N/A'}`;
+}
+
+// ── CFTC Commitment of Traders ──────────────────────────────────────────────
+
+export interface CotPosition {
+  market: string;
+  longPositions: number;
+  shortPositions: number;
+  netPosition: number;
+  changeInNet: number;
+  reportDate: string;
+}
+
+export interface CftcData {
+  positions: CotPosition[];
+  available: boolean;
+}
+
+let cftcCache: { data: CftcData; ts: number } | null = null;
+const CFTC_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours (weekly report)
+
+export async function fetchCftcData(): Promise<CftcData> {
+  if (cftcCache && Date.now() - cftcCache.ts < CFTC_CACHE_TTL) return cftcCache.data;
+
+  const positions: CotPosition[] = [];
+
+  try {
+    // CFTC SOCRATA API — Traders in Financial Futures
+    // Key markets: S&P 500, 10Y Note, Gold, Euro, Bitcoin
+    const contracts = [
+      { code: '13874A', name: 'E-Mini S&P 500' },
+      { code: '043602', name: '10-Year T-Note' },
+      { code: '088691', name: 'Gold' },
+      { code: '099741', name: 'Euro FX' },
+      { code: '133741', name: 'Bitcoin' },
+    ];
+
+    const url = `https://publicreporting.cftc.gov/resource/6dca-aqww.json?$order=report_date_as_yyyy_mm_dd DESC&$limit=50&$where=report_date_as_yyyy_mm_dd > '${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}'`;
+    const res = await fetch(url, {
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      // Get latest report per contract
+      const seen = new Set<string>();
+      for (const row of json) {
+        const name = row.market_and_exchange_names || row.contract_market_name || '';
+        const matched = contracts.find(c => name.includes(c.name));
+        if (matched && !seen.has(matched.name)) {
+          seen.add(matched.name);
+          const longPos = parseInt(row.noncomm_positions_long_all || '0');
+          const shortPos = parseInt(row.noncomm_positions_short_all || '0');
+          positions.push({
+            market: matched.name,
+            longPositions: longPos,
+            shortPositions: shortPos,
+            netPosition: longPos - shortPos,
+            changeInNet: parseInt(row.change_in_noncomm_long_all || '0') - parseInt(row.change_in_noncomm_short_all || '0'),
+            reportDate: row.report_date_as_yyyy_mm_dd || '',
+          });
+        }
+      }
+    }
+  } catch { /* silent */ }
+
+  const data: CftcData = { positions, available: positions.length > 0 };
+  cftcCache = { data, ts: Date.now() };
+  return data;
+}
+
+export function cftcToPromptBlock(cftc: CftcData): string {
+  if (!cftc.available) return 'CFTC COT DATA: Unavailable';
+  return `CFTC COMMITMENT OF TRADERS (non-commercial/speculative positioning):
+${cftc.positions.map(p =>
+    `- ${p.market}: Net ${p.netPosition > 0 ? '+' : ''}${p.netPosition.toLocaleString()} (Δ${p.changeInNet > 0 ? '+' : ''}${p.changeInNet.toLocaleString()}) | Long: ${p.longPositions.toLocaleString()} Short: ${p.shortPositions.toLocaleString()} [${p.reportDate}]`
+  ).join('\n')}`;
+}
+
+// ── Treasury.gov (Fiscal Data) ──────────────────────────────────────────────
+
+export interface TreasuryData {
+  tgaBalance: number | null;
+  tgaDate: string | null;
+  debtToThePenny: number | null;
+  debtDate: string | null;
+  avgInterestRate: number | null;
+  available: boolean;
+}
+
+let treasuryCache: { data: TreasuryData; ts: number } | null = null;
+const TREASURY_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
+
+export async function fetchTreasuryData(): Promise<TreasuryData> {
+  if (treasuryCache && Date.now() - treasuryCache.ts < TREASURY_CACHE_TTL) return treasuryCache.data;
+
+  let tgaBalance: number | null = null;
+  let tgaDate: string | null = null;
+  let debtToThePenny: number | null = null;
+  let debtDate: string | null = null;
+  let avgInterestRate: number | null = null;
+
+  // TGA Balance (Treasury General Account)
+  try {
+    const url = 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/dts/dts_table_1?sort=-record_date&page[size]=1&fields=record_date,close_today_bal&filter=account_type:eq:Treasury General Account (TGA) Closing Balance';
+    const res = await fetch(url);
+    if (res.ok) {
+      const json = await res.json();
+      const row = json.data?.[0];
+      if (row) {
+        tgaBalance = parseFloat(row.close_today_bal);
+        tgaDate = row.record_date;
+      }
+    }
+  } catch { /* silent */ }
+
+  // Debt to the Penny
+  try {
+    const url = 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny?sort=-record_date&page[size]=1';
+    const res = await fetch(url);
+    if (res.ok) {
+      const json = await res.json();
+      const row = json.data?.[0];
+      if (row) {
+        debtToThePenny = parseFloat(row.tot_pub_debt_out_amt);
+        debtDate = row.record_date;
+      }
+    }
+  } catch { /* silent */ }
+
+  // Average Interest Rate on Debt
+  try {
+    const url = 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/avg_interest_rates?sort=-record_date&page[size]=1&filter=security_desc:eq:Total Marketable';
+    const res = await fetch(url);
+    if (res.ok) {
+      const json = await res.json();
+      const row = json.data?.[0];
+      if (row?.avg_interest_rate_amt) {
+        avgInterestRate = parseFloat(row.avg_interest_rate_amt);
+      }
+    }
+  } catch { /* silent */ }
+
+  const data: TreasuryData = {
+    tgaBalance,
+    tgaDate,
+    debtToThePenny,
+    debtDate,
+    avgInterestRate,
+    available: tgaBalance !== null || debtToThePenny !== null,
+  };
+
+  treasuryCache = { data, ts: Date.now() };
+  return data;
+}
+
+export function treasuryToPromptBlock(t: TreasuryData): string {
+  if (!t.available) return 'TREASURY DATA: Unavailable';
+  return `U.S. TREASURY FISCAL DATA:
+- TGA Balance: ${t.tgaBalance ? '$' + (t.tgaBalance / 1e9).toFixed(1) + 'B' : 'N/A'}${t.tgaDate ? ` (${t.tgaDate})` : ''}${t.tgaBalance && t.tgaBalance < 100e9 ? ' ⚠️ LOW — liquidity squeeze risk' : ''}
+- National Debt: ${t.debtToThePenny ? '$' + (t.debtToThePenny / 1e12).toFixed(2) + 'T' : 'N/A'}${t.debtDate ? ` (${t.debtDate})` : ''}
+- Avg Interest Rate on Debt: ${t.avgInterestRate ? t.avgInterestRate.toFixed(2) + '%' : 'N/A'}`;
+}
+
+// ── DefiLlama (DeFi TVL & Stablecoins) ─────────────────────────────────────
+
+export interface DefiLlamaProtocol {
+  name: string;
+  tvl: number;
+  change1d: number;
+  change7d: number;
+  category: string;
+  chains: string[];
+}
+
+export interface DefiLlamaData {
+  totalTvl: number | null;
+  topProtocols: DefiLlamaProtocol[];
+  chainTvl: { name: string; tvl: number }[];
+  stablecoinMcap: number | null;
+  available: boolean;
+}
+
+let defiCache: { data: DefiLlamaData; ts: number } | null = null;
+const DEFI_CACHE_TTL = 15 * 60 * 1000; // 15 min
+
+export async function fetchDefiLlamaData(): Promise<DefiLlamaData> {
+  if (defiCache && Date.now() - defiCache.ts < DEFI_CACHE_TTL) return defiCache.data;
+
+  let totalTvl: number | null = null;
+  let topProtocols: DefiLlamaProtocol[] = [];
+  let chainTvl: { name: string; tvl: number }[] = [];
+  let stablecoinMcap: number | null = null;
+
+  // Top protocols by TVL
+  try {
+    const res = await fetch('https://api.llama.fi/protocols');
+    if (res.ok) {
+      const json = await res.json();
+      topProtocols = json
+        .sort((a: any, b: any) => (b.tvl || 0) - (a.tvl || 0))
+        .slice(0, 20)
+        .map((p: any) => ({
+          name: p.name,
+          tvl: p.tvl || 0,
+          change1d: p.change_1d || 0,
+          change7d: p.change_7d || 0,
+          category: p.category || 'Other',
+          chains: (p.chains || []).slice(0, 5),
+        }));
+    }
+  } catch { /* silent */ }
+
+  // Chain TVL
+  try {
+    const res = await fetch('https://api.llama.fi/v2/chains');
+    if (res.ok) {
+      const json = await res.json();
+      chainTvl = json
+        .sort((a: any, b: any) => (b.tvl || 0) - (a.tvl || 0))
+        .slice(0, 15)
+        .map((c: any) => ({ name: c.name, tvl: c.tvl || 0 }));
+      totalTvl = json.reduce((sum: number, c: any) => sum + (c.tvl || 0), 0);
+    }
+  } catch { /* silent */ }
+
+  // Stablecoin market cap
+  try {
+    const res = await fetch('https://stablecoins.llama.fi/stablecoins?includePrices=false');
+    if (res.ok) {
+      const json = await res.json();
+      stablecoinMcap = (json.peggedAssets || []).reduce(
+        (sum: number, s: any) => sum + (s.circulating?.peggedUSD || 0), 0
+      );
+    }
+  } catch { /* silent */ }
+
+  const data: DefiLlamaData = {
+    totalTvl,
+    topProtocols,
+    chainTvl,
+    stablecoinMcap,
+    available: topProtocols.length > 0 || chainTvl.length > 0,
+  };
+
+  defiCache = { data, ts: Date.now() };
+  return data;
+}
+
+export function defiLlamaToPromptBlock(d: DefiLlamaData): string {
+  if (!d.available) return 'DEFI DATA: Unavailable';
+  const fmtB = (n: number) => n >= 1e9 ? '$' + (n / 1e9).toFixed(1) + 'B' : '$' + (n / 1e6).toFixed(0) + 'M';
+  return `DEFI & ON-CHAIN DATA (DefiLlama):
+Total DeFi TVL: ${d.totalTvl ? fmtB(d.totalTvl) : 'N/A'}
+Stablecoin Market Cap: ${d.stablecoinMcap ? fmtB(d.stablecoinMcap) : 'N/A'}
+
+Top Protocols by TVL:
+${d.topProtocols.slice(0, 10).map(p =>
+    `- ${p.name}: ${fmtB(p.tvl)} (1d: ${p.change1d > 0 ? '+' : ''}${p.change1d.toFixed(1)}% | 7d: ${p.change7d > 0 ? '+' : ''}${p.change7d.toFixed(1)}%) [${p.category}]`
+  ).join('\n')}
+
+Chain TVL Rankings:
+${d.chainTvl.slice(0, 10).map(c => `- ${c.name}: ${fmtB(c.tvl)}`).join('\n')}`;
+}
+
 // ── TradingView Signals (from webhook) ─────────────────────────────────────
 
 export interface TradingViewSignalData {
@@ -556,27 +906,39 @@ export interface EnrichedData {
   fearGreed: FearGreedData | null;
   coinGecko: CoinGeckoData;
   tradingView: TradingViewSignalData;
+  bls: BlsData;
+  cftc: CftcData;
+  treasury: TreasuryData;
+  defiLlama: DefiLlamaData;
 }
 
 /** Fetch all enriched data in parallel. Safe to call frequently — cached. */
 export async function fetchAllEnrichedData(): Promise<EnrichedData> {
-  const [fred, finnhub, fearGreed, coinGecko, tradingView] = await Promise.all([
+  const [fred, finnhub, fearGreed, coinGecko, tradingView, bls, cftc, treasury, defiLlama] = await Promise.all([
     fetchFredData(),
     fetchFinnhubData(),
     fetchFearGreedIndex(),
     fetchCoinGeckoData(),
     fetchTradingViewSignals(),
+    fetchBlsData(),
+    fetchCftcData(),
+    fetchTreasuryData(),
+    fetchDefiLlamaData(),
   ]);
-  return { fred, finnhub, fearGreed, coinGecko, tradingView };
+  return { fred, finnhub, fearGreed, coinGecko, tradingView, bls, cftc, treasury, defiLlama };
 }
 
 /** Build a combined macro context block for AI prompts */
 export function enrichedDataToPromptBlock(data: EnrichedData): string {
   return [
     fredToPromptBlock(data.fred),
+    blsToPromptBlock(data.bls),
+    treasuryToPromptBlock(data.treasury),
+    cftcToPromptBlock(data.cftc),
     fearGreedToPromptBlock(data.fearGreed),
     finnhubToPromptBlock(data.finnhub),
     coinGeckoToPromptBlock(data.coinGecko),
+    defiLlamaToPromptBlock(data.defiLlama),
     tradingViewToPromptBlock(data.tradingView),
   ].join('\n\n');
 }

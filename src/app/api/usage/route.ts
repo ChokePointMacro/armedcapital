@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
-import { fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, fetchFinnhubData } from '@/lib/enrichedData';
+import { fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, fetchFinnhubData, fetchBlsData, fetchCftcData, fetchTreasuryData, fetchDefiLlamaData } from '@/lib/enrichedData';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -449,6 +449,96 @@ async function checkTradingView(): Promise<ServiceStatus> {
   }
 }
 
+async function checkBLS(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const data = await fetchBlsData();
+    const latency = Date.now() - start;
+    return {
+      name: 'BLS (Labor Statistics)',
+      category: 'data',
+      connected: data.available,
+      latencyMs: latency,
+      error: data.available ? null : 'No data returned',
+      limits: {
+        label: 'Employment & CPI Data',
+        tier: process.env.BLS_API_KEY ? 'Registered (v2)' : 'Public (v2)',
+        requests: { used: null, max: process.env.BLS_API_KEY ? 500 : 25, window: 'per day' },
+        notes: `CPI: ${data.cpiAllItems?.toFixed(1) ?? 'N/A'} | Unemployment: ${data.unemploymentRate ? data.unemploymentRate.toFixed(1) + '%' : 'N/A'} | NFP: ${data.nonfarmPayrolls ? data.nonfarmPayrolls.toLocaleString() + 'K' : 'N/A'}`,
+      },
+    };
+  } catch (err) {
+    return { name: 'BLS (Labor Statistics)', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
+async function checkCFTC(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const data = await fetchCftcData();
+    const latency = Date.now() - start;
+    return {
+      name: 'CFTC COT Reports',
+      category: 'data',
+      connected: data.available,
+      latencyMs: latency,
+      error: data.available ? null : 'No COT data returned',
+      limits: {
+        label: 'Commitment of Traders',
+        tier: 'Public (SOCRATA)',
+        notes: `Tracking ${data.positions.length} contracts. No API key required. Updated weekly (Tuesday).`,
+      },
+    };
+  } catch (err) {
+    return { name: 'CFTC COT Reports', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
+async function checkTreasury(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const data = await fetchTreasuryData();
+    const latency = Date.now() - start;
+    return {
+      name: 'Treasury.gov',
+      category: 'data',
+      connected: data.available,
+      latencyMs: latency,
+      error: data.available ? null : 'No fiscal data returned',
+      limits: {
+        label: 'Fiscal Data API',
+        tier: 'Public',
+        notes: `TGA: ${data.tgaBalance ? '$' + (data.tgaBalance / 1e9).toFixed(1) + 'B' : 'N/A'} | Debt: ${data.debtToThePenny ? '$' + (data.debtToThePenny / 1e12).toFixed(2) + 'T' : 'N/A'} | Avg Rate: ${data.avgInterestRate ? data.avgInterestRate.toFixed(2) + '%' : 'N/A'}`,
+      },
+    };
+  } catch (err) {
+    return { name: 'Treasury.gov', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
+async function checkDefiLlama(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const data = await fetchDefiLlamaData();
+    const latency = Date.now() - start;
+    const fmtB = (n: number) => n >= 1e9 ? '$' + (n / 1e9).toFixed(1) + 'B' : '$' + (n / 1e6).toFixed(0) + 'M';
+    return {
+      name: 'DefiLlama',
+      category: 'data',
+      connected: data.available,
+      latencyMs: latency,
+      error: data.available ? null : 'No DeFi data returned',
+      limits: {
+        label: 'DeFi TVL & Stablecoins',
+        tier: 'Free (Open)',
+        notes: `TVL: ${data.totalTvl ? fmtB(data.totalTvl) : 'N/A'} | Stablecoins: ${data.stablecoinMcap ? fmtB(data.stablecoinMcap) : 'N/A'} | Tracking ${data.topProtocols.length} protocols, ${data.chainTvl.length} chains`,
+      },
+    };
+  } catch (err) {
+    return { name: 'DefiLlama', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
 // ── Consumption data queries ─────────────────────────────────────────────────
 
 async function getConsumptionData() {
@@ -526,7 +616,7 @@ export async function GET() {
     await safeAuth();
 
     // Run live checks in parallel — original + new enrichment sources
-    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko, consumption, tvSignals] = await Promise.all([
+    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko, consumption, tvSignals, bls, cftc, treasury, defiLlama] = await Promise.all([
       checkAnthropic(),
       checkOpenAI(),
       checkGemini(),
@@ -538,6 +628,10 @@ export async function GET() {
       checkCoinGecko(),
       getConsumptionData(),
       checkTradingView(),
+      checkBLS(),
+      checkCFTC(),
+      checkTreasury(),
+      checkDefiLlama(),
     ]);
 
     // Static checks (no network call needed)
@@ -551,6 +645,7 @@ export async function GET() {
     const services: ServiceStatus[] = [
       anthropic, openai, gemini,
       publicApi, yahoo, fred, finnhub, fearGreed, coinGecko, tvSignals,
+      bls, cftc, treasury, defiLlama,
       supabase, redis, pinecone, vercel, resend,
       twitter,
     ];
