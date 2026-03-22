@@ -6,10 +6,8 @@ indicator("Armed Capital Webhook", overlay=true)
 
 // ─── INPUTS ────────────────────────────────────────────────────────────────────
 
-webhookSecret = input.string("04a64a2412a07a673c3ceecf239d57769ec8f96a1222e752c83a6995e0723982", "Webhook Secret", tooltip="Must match TV_WEBHOOK_SECRET in Vercel env vars")
-
 // Signal detection method
-srcMethod = input.string("EMA Cross", "Signal Method", options=["EMA Cross", "RSI Extremes", "VWAP Bounce", "Manual Only"])
+srcMethod = input.string("EMA Cross", "Signal Method", options=["EMA Cross", "RSI Extremes", "VWAP Bounce"])
 
 // EMA Cross settings
 fastLen = input.int(9, "Fast EMA", minval=1)
@@ -42,29 +40,22 @@ if srcMethod == "EMA Cross"
     buySignal  := ta.crossover(fastEma, slowEma)
     sellSignal := ta.crossunder(fastEma, slowEma)
 else if srcMethod == "RSI Extremes"
-    buySignal  := ta.crossover(rsiVal, rsiOS)   // RSI crosses above oversold
-    sellSignal := ta.crossunder(rsiVal, rsiOB)  // RSI crosses below overbought
+    buySignal  := ta.crossover(rsiVal, rsiOS)
+    sellSignal := ta.crossunder(rsiVal, rsiOB)
 else if srcMethod == "VWAP Bounce"
-    buySignal  := ta.crossover(close, vwapLower)  // Price bounces off lower band
-    sellSignal := ta.crossunder(close, vwapUpper) // Price rejects upper band
-else
-    buySignal  := false
-    sellSignal := false
+    buySignal  := ta.crossover(close, vwapLower)
+    sellSignal := ta.crossunder(close, vwapUpper)
 
-// ─── JSON PAYLOAD BUILDER ──────────────────────────────────────────────────────
-// This is the key part — the alert message is pre-formatted JSON
-// TradingView fills in {{ticker}}, {{exchange}}, etc. at fire time
+// ─── ALERT CONDITIONS ──────────────────────────────────────────────────────────
+// alertcondition() auto-fills the Message box when you create an alert.
+// The JSON payload + secret is baked in. Just check "Webhook URL" and paste
+// https://armedcapital.vercel.app/api/webhooks/tradingview — done.
 
-buyPayload  = '{"secret":"' + webhookSecret + '","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"buy","time":"{{time}}","strategy":"' + srcMethod + '"}'
-sellPayload = '{"secret":"' + webhookSecret + '","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"sell","time":"{{time}}","strategy":"' + srcMethod + '"}'
+alertcondition(buySignal, title="Armed Capital — BUY", message='{"secret":"04a64a2412a07a673c3ceecf239d57769ec8f96a1222e752c83a6995e0723982","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"buy","time":"{{time}}"}')
 
-// ─── FIRE ALERTS ───────────────────────────────────────────────────────────────
+alertcondition(sellSignal, title="Armed Capital — SELL", message='{"secret":"04a64a2412a07a673c3ceecf239d57769ec8f96a1222e752c83a6995e0723982","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"sell","time":"{{time}}"}')
 
-if buySignal
-    alert(buyPayload, alert.freq_once_per_bar)
-
-if sellSignal
-    alert(sellPayload, alert.freq_once_per_bar)
+alertcondition(buySignal or sellSignal, title="Armed Capital — ANY SIGNAL", message='{"secret":"04a64a2412a07a673c3ceecf239d57769ec8f96a1222e752c83a6995e0723982","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"alert","time":"{{time}}"}')
 
 // ─── PLOT SIGNALS ON CHART ─────────────────────────────────────────────────────
 
