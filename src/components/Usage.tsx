@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Loader2, Wifi, WifiOff, Zap, Clock, AlertTriangle, CheckCircle2, XCircle, Activity } from 'lucide-react';
+import { RefreshCw, Loader2, Wifi, WifiOff, Zap, Clock, AlertTriangle, CheckCircle2, XCircle, Activity, ExternalLink, Star, DollarSign, TrendingUp, Database, Globe, Lock, Radio } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { ApiKeyManager } from './ApiKeyManager';
 
@@ -436,6 +436,409 @@ export function Usage({ user }: { user: any }) {
           <ApiKeyManager />
         </div>
       )}
+
+      {/* Recommended Data Sources */}
+      {data && <RecommendedSources />}
+    </div>
+  );
+}
+
+// ── Recommended Data Sources ─────────────────────────────────────────────────
+
+interface DataSource {
+  name: string;
+  provider: string;
+  category: 'market-data' | 'alternative-data' | 'on-chain' | 'macro' | 'sentiment' | 'ai-ml' | 'news';
+  description: string;
+  pricing: string;
+  tier: 'free' | 'freemium' | 'paid' | 'enterprise';
+  url: string;
+  relevance: 'critical' | 'high' | 'medium';
+  integrated: boolean;
+  envVar?: string;
+  features: string[];
+}
+
+const RECOMMENDED_SOURCES: DataSource[] = [
+  // ── Currently Integrated ──
+  {
+    name: 'TradingView Webhooks',
+    provider: 'TradingView',
+    category: 'market-data',
+    description: 'Real-time price alerts, custom indicator signals, and strategy notifications via webhook.',
+    pricing: 'Premium: $14.95/mo | Pro+: $29.95/mo',
+    tier: 'paid',
+    url: 'https://www.tradingview.com/gopro/',
+    relevance: 'critical',
+    integrated: true,
+    envVar: 'TV_WEBHOOK_SECRET',
+    features: ['Custom alert conditions', 'Multi-timeframe signals', 'Strategy backtesting', 'Pine Script indicators'],
+  },
+  {
+    name: 'FRED Economic Data',
+    provider: 'Federal Reserve Bank of St. Louis',
+    category: 'macro',
+    description: 'Treasury yields, CPI, employment, GDP, and 800K+ economic time series.',
+    pricing: 'Free — 120 requests/min',
+    tier: 'free',
+    url: 'https://fred.stlouisfed.org/docs/api/fred/',
+    relevance: 'critical',
+    integrated: true,
+    envVar: 'FRED_API_KEY',
+    features: ['Treasury yield curves', 'CPI/PPI inflation', 'Employment data', 'GDP components'],
+  },
+  {
+    name: 'Finnhub',
+    provider: 'Finnhub',
+    category: 'market-data',
+    description: 'Real-time stock quotes, company fundamentals, insider transactions, and earnings data.',
+    pricing: 'Free: 60 calls/min | Premium: from $49/mo',
+    tier: 'freemium',
+    url: 'https://finnhub.io/pricing',
+    relevance: 'critical',
+    integrated: true,
+    envVar: 'FINNHUB_API_KEY',
+    features: ['Real-time quotes', 'Company profiles', 'Insider trading', 'Earnings calendar'],
+  },
+  {
+    name: 'CoinGecko',
+    provider: 'CoinGecko',
+    category: 'on-chain',
+    description: 'Crypto market data — prices, volume, market cap, DeFi TVL, and exchange data.',
+    pricing: 'Free: 30 calls/min | Pro: $129/mo',
+    tier: 'freemium',
+    url: 'https://www.coingecko.com/en/api/pricing',
+    relevance: 'critical',
+    integrated: true,
+    envVar: 'COINGECKO_API_KEY',
+    features: ['Top coins by market cap', 'BTC dominance', 'Exchange volumes', 'DeFi TVL tracking'],
+  },
+  {
+    name: 'CNN Fear & Greed Index',
+    provider: 'CNN / Alternative.me',
+    category: 'sentiment',
+    description: 'Market sentiment composite — combines volatility, momentum, safe haven demand, and options flow.',
+    pricing: 'Free — no API key needed',
+    tier: 'free',
+    url: 'https://edition.cnn.com/markets/fear-and-greed',
+    relevance: 'high',
+    integrated: true,
+    features: ['Daily sentiment score', 'Historical sentiment', 'Contrarian signal detection'],
+  },
+  // ── Recommended Additions ──
+  {
+    name: 'Polygon.io',
+    provider: 'Polygon',
+    category: 'market-data',
+    description: 'Institutional-grade real-time and historical stock, options, forex, and crypto data. WebSocket streaming and REST APIs.',
+    pricing: 'Free: 5 calls/min | Starter: $29/mo | Developer: $79/mo',
+    tier: 'freemium',
+    url: 'https://polygon.io/pricing',
+    relevance: 'critical',
+    integrated: false,
+    features: ['Tick-level data', 'Options flow', 'Forex pairs', 'WebSocket streaming', 'Aggregated bars'],
+  },
+  {
+    name: 'Unusual Whales',
+    provider: 'Unusual Whales',
+    category: 'alternative-data',
+    description: 'Congressional trading tracker, dark pool flow, options flow, and insider transaction alerts. Key for detecting smart money moves.',
+    pricing: 'Free tier available | Premium: $57/mo',
+    tier: 'freemium',
+    url: 'https://unusualwhales.com/pricing',
+    relevance: 'critical',
+    integrated: false,
+    features: ['Congressional trades', 'Dark pool prints', 'Options flow alerts', 'Sector rotation signals'],
+  },
+  {
+    name: 'Glassnode',
+    provider: 'Glassnode',
+    category: 'on-chain',
+    description: 'On-chain intelligence — BTC/ETH exchange flows, whale wallets, SOPR, MVRV, and miner metrics. Essential for crypto macro.',
+    pricing: 'Free: limited | Advanced: $29/mo | Professional: $799/mo',
+    tier: 'freemium',
+    url: 'https://glassnode.com/pricing',
+    relevance: 'high',
+    integrated: false,
+    features: ['Exchange net flows', 'Whale wallet tracking', 'SOPR / MVRV ratios', 'Miner revenue metrics'],
+  },
+  {
+    name: 'Quiver Quantitative',
+    provider: 'Quiver Quant',
+    category: 'alternative-data',
+    description: 'Alternative data platform — government contracts, lobbying spend, patent filings, insider trades, and Reddit/WSB sentiment.',
+    pricing: 'Free tier available | Pro: $10/mo',
+    tier: 'freemium',
+    url: 'https://www.quiverquant.com/',
+    relevance: 'high',
+    integrated: false,
+    features: ['Gov contracts', 'Lobbying data', 'WSB sentiment', 'Patent filings', 'Corporate jet tracking'],
+  },
+  {
+    name: 'Alpha Vantage',
+    provider: 'Alpha Vantage',
+    category: 'market-data',
+    description: 'Free stock, forex, and crypto data with technical indicators. Good redundancy for Finnhub.',
+    pricing: 'Free: 25 calls/day | Premium: from $49.99/mo',
+    tier: 'freemium',
+    url: 'https://www.alphavantage.co/premium/',
+    relevance: 'medium',
+    integrated: false,
+    features: ['Technical indicators', 'Fundamental data', 'Forex rates', 'Crypto data', 'Earnings estimates'],
+  },
+  {
+    name: 'Santiment',
+    provider: 'Santiment',
+    category: 'sentiment',
+    description: 'Crypto social sentiment, development activity, whale alerts, and on-chain behavioral analytics.',
+    pricing: 'Free: limited | Pro: $49/mo | Pro+: $250/mo',
+    tier: 'freemium',
+    url: 'https://santiment.net/pricing/',
+    relevance: 'high',
+    integrated: false,
+    features: ['Social volume tracking', 'Developer activity', 'Whale transaction alerts', 'Network growth metrics'],
+  },
+  {
+    name: 'CFTC COT Reports',
+    provider: 'CFTC / Quandl',
+    category: 'macro',
+    description: 'Commitment of Traders data — institutional positioning in futures markets. Critical for understanding big money flows.',
+    pricing: 'Free via CFTC | Quandl: free tier available',
+    tier: 'free',
+    url: 'https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm',
+    relevance: 'high',
+    integrated: false,
+    features: ['Institutional positioning', 'Commercial vs speculative', 'Futures open interest', 'Weekly updates'],
+  },
+  {
+    name: 'NewsAPI / Mediastack',
+    provider: 'NewsAPI.org / Mediastack',
+    category: 'news',
+    description: 'Real-time and historical news headlines across financial markets. Useful for event-driven signal generation.',
+    pricing: 'Free: 100 req/day | Business: from $49/mo',
+    tier: 'freemium',
+    url: 'https://newsapi.org/pricing',
+    relevance: 'medium',
+    integrated: false,
+    features: ['Breaking news alerts', 'Source filtering', 'Keyword monitoring', 'Historical archives'],
+  },
+  {
+    name: 'Treasury.gov Direct',
+    provider: 'U.S. Department of the Treasury',
+    category: 'macro',
+    description: 'Direct Treasury auction data, debt-to-the-penny, TGA balance, and fiscal data. Bypasses FRED for primary source.',
+    pricing: 'Free — no API key needed',
+    tier: 'free',
+    url: 'https://fiscaldata.treasury.gov/api-documentation/',
+    relevance: 'high',
+    integrated: false,
+    features: ['Treasury auction results', 'TGA balance', 'National debt tracking', 'Interest expense data'],
+  },
+  {
+    name: 'DefiLlama',
+    provider: 'DefiLlama',
+    category: 'on-chain',
+    description: 'DeFi TVL aggregator — protocol-level TVL, yield data, stablecoin flows, and bridge volumes. No API key required.',
+    pricing: 'Free — fully open',
+    tier: 'free',
+    url: 'https://defillama.com/docs/api',
+    relevance: 'high',
+    integrated: false,
+    features: ['Protocol TVL rankings', 'Chain TVL comparison', 'Stablecoin supply tracking', 'DEX volume data'],
+  },
+  {
+    name: 'BLS (Bureau of Labor Statistics)',
+    provider: 'U.S. Bureau of Labor Statistics',
+    category: 'macro',
+    description: 'Primary source for CPI, PPI, employment, wages, and productivity data. Direct from the source — no FRED lag.',
+    pricing: 'Free — v2 API with registration',
+    tier: 'free',
+    url: 'https://www.bls.gov/developers/',
+    relevance: 'medium',
+    integrated: false,
+    features: ['CPI components', 'Nonfarm payrolls', 'Wage growth', 'Productivity data'],
+  },
+];
+
+const SOURCE_CATEGORY_LABELS: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+  'market-data': { label: 'Market Data', icon: <TrendingUp size={12} />, color: 'text-green-400' },
+  'alternative-data': { label: 'Alternative Data', icon: <Database size={12} />, color: 'text-purple-400' },
+  'on-chain': { label: 'On-Chain / DeFi', icon: <Radio size={12} />, color: 'text-btc-orange' },
+  'macro': { label: 'Macro / Economic', icon: <Globe size={12} />, color: 'text-blue-400' },
+  'sentiment': { label: 'Sentiment', icon: <Activity size={12} />, color: 'text-yellow-400' },
+  'ai-ml': { label: 'AI / ML', icon: <Zap size={12} />, color: 'text-pink-400' },
+  'news': { label: 'News / Events', icon: <Globe size={12} />, color: 'text-teal-400' },
+};
+
+const TIER_BADGES: Record<string, { label: string; color: string }> = {
+  free: { label: 'FREE', color: 'text-green-400 bg-green-400/10 border-green-400/20' },
+  freemium: { label: 'FREEMIUM', color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+  paid: { label: 'PAID', color: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
+  enterprise: { label: 'ENTERPRISE', color: 'text-purple-400 bg-purple-400/10 border-purple-400/20' },
+};
+
+const RELEVANCE_BADGES: Record<string, { label: string; color: string }> = {
+  critical: { label: 'CRITICAL', color: 'text-red-400 bg-red-400/10 border-red-400/20' },
+  high: { label: 'HIGH', color: 'text-orange-400 bg-orange-400/10 border-orange-400/20' },
+  medium: { label: 'MEDIUM', color: 'text-gray-400 bg-gray-400/10 border-gray-400/20' },
+};
+
+function RecommendedSources() {
+  const [filter, setFilter] = useState<'all' | 'integrated' | 'recommended'>('all');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const filtered = RECOMMENDED_SOURCES.filter(s => {
+    if (filter === 'integrated') return s.integrated;
+    if (filter === 'recommended') return !s.integrated;
+    return true;
+  });
+
+  // Group by category
+  const grouped = filtered.reduce<Record<string, DataSource[]>>((acc, src) => {
+    if (!acc[src.category]) acc[src.category] = [];
+    acc[src.category].push(src);
+    return acc;
+  }, {});
+
+  const categoryOrder = ['market-data', 'macro', 'on-chain', 'alternative-data', 'sentiment', 'news', 'ai-ml'];
+  const integratedCount = RECOMMENDED_SOURCES.filter(s => s.integrated).length;
+  const recommendedCount = RECOMMENDED_SOURCES.filter(s => !s.integrated).length;
+  const freeCount = RECOMMENDED_SOURCES.filter(s => !s.integrated && (s.tier === 'free' || s.tier === 'freemium')).length;
+
+  return (
+    <div className="mt-8 border-t border-gray-800 pt-6">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-mono text-gray-200 flex items-center gap-2">
+            <Star size={14} className="text-btc-orange" />
+            Data Sources & Integrations
+          </h2>
+          <p className="text-[10px] font-mono text-gray-600 mt-1">
+            {integratedCount} active &middot; {recommendedCount} recommended &middot; {freeCount} have free tiers
+          </p>
+        </div>
+        <div className="flex gap-1">
+          {(['all', 'integrated', 'recommended'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`text-[10px] font-mono px-2.5 py-1 rounded border transition-colors ${
+                filter === f
+                  ? 'border-btc-orange/50 bg-btc-orange/10 text-btc-orange'
+                  : 'border-gray-800 bg-gray-900/60 text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {f === 'all' ? 'All' : f === 'integrated' ? 'Active' : 'Recommended'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {categoryOrder.map(cat => {
+        const sources = grouped[cat];
+        if (!sources || sources.length === 0) return null;
+        const catInfo = SOURCE_CATEGORY_LABELS[cat];
+
+        return (
+          <div key={cat} className="mb-5">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`${catInfo?.color || 'text-gray-400'}`}>{catInfo?.icon}</span>
+              <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest">{catInfo?.label || cat}</span>
+              <span className="h-px flex-1 bg-gray-800/50" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {sources.map(src => {
+                const expanded = expandedId === src.name;
+                const tierBadge = TIER_BADGES[src.tier];
+                const relevanceBadge = RELEVANCE_BADGES[src.relevance];
+
+                return (
+                  <div
+                    key={src.name}
+                    className={`border rounded-lg transition-all cursor-pointer ${
+                      src.integrated
+                        ? 'border-green-900/30 bg-green-950/10 hover:border-green-800/40'
+                        : 'border-gray-800 bg-gray-900/60 hover:border-gray-700'
+                    }`}
+                    onClick={() => setExpandedId(expanded ? null : src.name)}
+                  >
+                    <div className="p-4">
+                      {/* Header */}
+                      <div className="flex items-start justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          {src.integrated ? (
+                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
+                          ) : (
+                            <div className="w-2 h-2 rounded-full bg-gray-600" />
+                          )}
+                          <span className="text-sm font-mono text-gray-200">{src.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border ${relevanceBadge.color}`}>
+                            {relevanceBadge.label}
+                          </span>
+                          <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border ${tierBadge.color}`}>
+                            {tierBadge.label}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Provider + status */}
+                      <div className="text-[10px] font-mono text-gray-600 mb-1.5">{src.provider}</div>
+
+                      {/* Description */}
+                      <p className="text-[10px] font-mono text-gray-400 leading-relaxed mb-2">{src.description}</p>
+
+                      {/* Pricing */}
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                        <DollarSign size={10} className="text-gray-600" />
+                        <span className="text-gray-500">{src.pricing}</span>
+                      </div>
+
+                      {/* Expanded details */}
+                      {expanded && (
+                        <div className="mt-3 pt-3 border-t border-gray-800/50 space-y-2">
+                          {/* Features */}
+                          <div>
+                            <div className="text-[9px] font-mono text-gray-600 uppercase mb-1">Key Features</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {src.features.map(f => (
+                                <span key={f} className="text-[9px] font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
+                                  {f}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Env var */}
+                          {src.envVar && (
+                            <div className="text-[10px] font-mono text-gray-600">
+                              Env: <span className="text-btc-orange/70">{src.envVar}</span>
+                              {src.integrated && <span className="text-green-500 ml-2">Configured</span>}
+                            </div>
+                          )}
+
+                          {/* Link */}
+                          <a
+                            href={src.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] font-mono text-btc-orange hover:text-btc-orange/80 transition-colors"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <ExternalLink size={10} /> View Documentation
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
