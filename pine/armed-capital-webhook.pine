@@ -1,0 +1,79 @@
+// This Pine Script™ is subject to the Terms of Use at https://www.tradingview.com/pine-script-docs/
+// © Armed Capital — Webhook Relay for armedcapital.vercel.app
+
+//@version=6
+indicator("Armed Capital Webhook", overlay=true)
+
+// ─── INPUTS ────────────────────────────────────────────────────────────────────
+
+webhookSecret = input.string("04a64a2412a07a673c3ceecf239d57769ec8f96a1222e752c83a6995e0723982", "Webhook Secret", tooltip="Must match TV_WEBHOOK_SECRET in Vercel env vars")
+
+// Signal detection method
+srcMethod = input.string("EMA Cross", "Signal Method", options=["EMA Cross", "RSI Extremes", "VWAP Bounce", "Manual Only"])
+
+// EMA Cross settings
+fastLen = input.int(9, "Fast EMA", minval=1)
+slowLen = input.int(21, "Slow EMA", minval=1)
+
+// RSI settings
+rsiLen = input.int(14, "RSI Length", minval=1)
+rsiOB  = input.int(70, "RSI Overbought", minval=50, maxval=95)
+rsiOS  = input.int(30, "RSI Oversold", minval=5, maxval=50)
+
+// VWAP Bounce settings
+vwapDev = input.float(1.0, "VWAP StdDev Band", minval=0.1, step=0.1)
+
+// ─── CALCULATIONS ──────────────────────────────────────────────────────────────
+
+fastEma = ta.ema(close, fastLen)
+slowEma = ta.ema(close, slowLen)
+rsiVal  = ta.rsi(close, rsiLen)
+vwapVal = ta.vwap(hlc3)
+vwapStd = ta.stdev(close, 20)
+vwapUpper = vwapVal + vwapDev * vwapStd
+vwapLower = vwapVal - vwapDev * vwapStd
+
+// ─── SIGNAL LOGIC ──────────────────────────────────────────────────────────────
+
+var bool buySignal  = false
+var bool sellSignal = false
+
+if srcMethod == "EMA Cross"
+    buySignal  := ta.crossover(fastEma, slowEma)
+    sellSignal := ta.crossunder(fastEma, slowEma)
+else if srcMethod == "RSI Extremes"
+    buySignal  := ta.crossover(rsiVal, rsiOS)   // RSI crosses above oversold
+    sellSignal := ta.crossunder(rsiVal, rsiOB)  // RSI crosses below overbought
+else if srcMethod == "VWAP Bounce"
+    buySignal  := ta.crossover(close, vwapLower)  // Price bounces off lower band
+    sellSignal := ta.crossunder(close, vwapUpper) // Price rejects upper band
+else
+    buySignal  := false
+    sellSignal := false
+
+// ─── JSON PAYLOAD BUILDER ──────────────────────────────────────────────────────
+// This is the key part — the alert message is pre-formatted JSON
+// TradingView fills in {{ticker}}, {{exchange}}, etc. at fire time
+
+buyPayload  = '{"secret":"' + webhookSecret + '","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"buy","time":"{{time}}","strategy":"' + srcMethod + '"}'
+sellPayload = '{"secret":"' + webhookSecret + '","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"sell","time":"{{time}}","strategy":"' + srcMethod + '"}'
+
+// ─── FIRE ALERTS ───────────────────────────────────────────────────────────────
+
+if buySignal
+    alert(buyPayload, alert.freq_once_per_bar)
+
+if sellSignal
+    alert(sellPayload, alert.freq_once_per_bar)
+
+// ─── PLOT SIGNALS ON CHART ─────────────────────────────────────────────────────
+
+plotshape(buySignal,  title="Buy",  style=shape.triangleup,   location=location.belowbar, color=color.new(#10b981, 0), size=size.small, text="BUY")
+plotshape(sellSignal, title="Sell", style=shape.triangledown, location=location.abovebar, color=color.new(#ef4444, 0), size=size.small, text="SELL")
+
+// Overlay EMAs / VWAP depending on method
+plot(srcMethod == "EMA Cross" ? fastEma : na, "Fast EMA", color=color.new(#10b981, 30), linewidth=1)
+plot(srcMethod == "EMA Cross" ? slowEma : na, "Slow EMA", color=color.new(#ef4444, 30), linewidth=1)
+plot(srcMethod == "VWAP Bounce" ? vwapVal : na, "VWAP", color=color.new(#f7931a, 20), linewidth=1)
+plot(srcMethod == "VWAP Bounce" ? vwapUpper : na, "VWAP Upper", color=color.new(#f7931a, 60), linewidth=1, style=plot.style_circles)
+plot(srcMethod == "VWAP Bounce" ? vwapLower : na, "VWAP Lower", color=color.new(#f7931a, 60), linewidth=1, style=plot.style_circles)
