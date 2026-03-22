@@ -55,6 +55,9 @@ const KEY_REGISTRY: Array<{
   // X (Twitter) OAuth 2.0
   { envVar: 'X_CLIENT_ID', name: 'X Client ID (OAuth 2.0)', service: 'X (Twitter)', category: 'social' },
   { envVar: 'X_CLIENT_SECRET', name: 'X Client Secret (OAuth 2.0)', service: 'X (Twitter)', category: 'social' },
+
+  // TradingView
+  { envVar: 'TV_WEBHOOK_SECRET', name: 'TradingView Webhook Secret', service: 'TradingView', category: 'data' },
 ];
 
 export async function GET() {

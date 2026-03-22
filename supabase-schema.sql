@@ -107,7 +107,29 @@ CREATE TABLE IF NOT EXISTS context_files (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- TradingView webhook signals
+CREATE TABLE IF NOT EXISTS tradingview_signals (
+  id SERIAL PRIMARY KEY,
+  ticker TEXT,
+  exchange TEXT,
+  action TEXT DEFAULT 'alert',           -- buy, sell, alert, long, short, close
+  strategy TEXT,                          -- strategy or indicator name
+  message TEXT,                           -- free-form signal description
+  interval_tf TEXT,                       -- timeframe (1, 5, 15, 60, D, W, M)
+  price_close NUMERIC,
+  price_open NUMERIC,
+  price_high NUMERIC,
+  price_low NUMERIC,
+  volume NUMERIC,
+  payload JSONB,                          -- full raw webhook payload
+  received_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes
+CREATE INDEX IF NOT EXISTS idx_tv_signals_ticker ON tradingview_signals(ticker);
+CREATE INDEX IF NOT EXISTS idx_tv_signals_received ON tradingview_signals(received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tv_signals_action ON tradingview_signals(action);
+
 CREATE INDEX IF NOT EXISTS idx_reports_type ON reports(type);
 CREATE INDEX IF NOT EXISTS idx_reports_updated ON reports(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scheduled_posts_status ON scheduled_posts(status);
@@ -126,6 +148,7 @@ ALTER TABLE watchlist ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE context_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pending_auth ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tradingview_signals ENABLE ROW LEVEL SECURITY;
 
 -- Permissive policies (tighten later once auth is fully wired)
 CREATE POLICY "Allow all" ON users FOR ALL USING (true);
@@ -138,3 +161,4 @@ CREATE POLICY "Allow all" ON watchlist FOR ALL USING (true);
 CREATE POLICY "Allow all" ON app_settings FOR ALL USING (true);
 CREATE POLICY "Allow all" ON context_files FOR ALL USING (true);
 CREATE POLICY "Allow all" ON pending_auth FOR ALL USING (true);
+CREATE POLICY "Allow all" ON tradingview_signals FOR ALL USING (true);

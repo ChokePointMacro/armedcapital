@@ -424,6 +424,31 @@ async function checkCoinGecko(): Promise<ServiceStatus> {
   }
 }
 
+async function checkTradingView(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const { fetchTradingViewSignals } = await import('@/lib/enrichedData');
+    const data = await fetchTradingViewSignals();
+    const latency = Date.now() - start;
+    const hasSecret = !!process.env.TV_WEBHOOK_SECRET;
+    return {
+      name: 'TradingView',
+      category: 'data',
+      connected: true, // Webhook receiver is always "connected" — it's a passive endpoint
+      latencyMs: latency,
+      error: null,
+      limits: {
+        label: 'Webhook Signal Relay',
+        tier: 'Premium',
+        requests: { used: data.count, max: null, window: 'last 6h' },
+        notes: `${data.count} signals buffered. Auth: ${hasSecret ? 'Secret configured' : 'Open mode (no secret)'}. Webhook: /api/webhooks/tradingview`,
+      },
+    };
+  } catch (err) {
+    return { name: 'TradingView', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
 // ── Consumption data queries ─────────────────────────────────────────────────
 
 async function getConsumptionData() {
@@ -501,7 +526,7 @@ export async function GET() {
     await safeAuth();
 
     // Run live checks in parallel — original + new enrichment sources
-    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko, consumption] = await Promise.all([
+    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko, consumption, tvSignals] = await Promise.all([
       checkAnthropic(),
       checkOpenAI(),
       checkGemini(),
@@ -512,6 +537,7 @@ export async function GET() {
       checkFearGreed(),
       checkCoinGecko(),
       getConsumptionData(),
+      checkTradingView(),
     ]);
 
     // Static checks (no network call needed)
@@ -524,7 +550,7 @@ export async function GET() {
 
     const services: ServiceStatus[] = [
       anthropic, openai, gemini,
-      publicApi, yahoo, fred, finnhub, fearGreed, coinGecko,
+      publicApi, yahoo, fred, finnhub, fearGreed, coinGecko, tvSignals,
       supabase, redis, pinecone, vercel, resend,
       twitter,
     ];

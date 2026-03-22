@@ -73,6 +73,7 @@ const AVATAR_PALETTES: Record<string, { primary: string; secondary: string; acce
   BROADCASTER: { primary: '#0ea5e9', secondary: '#0369a1', accent: '#7dd3fc', bg: '#0c4a6e' },
   SPECTRE:   { primary: '#22c55e', secondary: '#15803d', accent: '#86efac', bg: '#052e16' },
   MOSAIC:    { primary: '#eab308', secondary: '#a16207', accent: '#fde047', bg: '#422006' },
+  HAWKEYE:   { primary: '#06b6d4', secondary: '#0e7490', accent: '#67e8f9', bg: '#083344' },
 };
 
 function AgentAvatar({ codename, size = 56 }: { codename: string; size?: number }) {
@@ -149,6 +150,7 @@ const REPORTS_TO: Record<string, string> = {
   'it': 'active-partner',
   'market-scanner': 'asset-management',
   'data-enrichment': 'asset-management',
+  'tradingview-relay': 'asset-management',
   'quality-control': 'hr',
   'cx': 'hr',
   'engineer': 'it',
@@ -168,7 +170,7 @@ const TIER_MAP: Record<number, string[]> = {
   1: ['passive-partner', 'private-equity', 'asset-management', 'bookkeeping', 'report-generator', 'research-development'],
   2: ['marketing', 'sales', 'hr', 'it'],
   3: ['auto-scheduler', 'quality-control', 'cx', 'engineer', 'dev', 'api-key-manager'],
-  4: ['market-scanner', 'data-enrichment'],
+  4: ['market-scanner', 'data-enrichment', 'tradingview-relay'],
 };
 
 const TIER_LABELS = ['C-SUITE', 'SENIOR LEADERSHIP', 'DEPARTMENT HEADS', 'SPECIALISTS', 'FIELD OPERATIVES'];

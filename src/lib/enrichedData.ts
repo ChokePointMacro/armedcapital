@@ -444,6 +444,110 @@ Trending Coins (social momentum):
 ${cg.trending.map(t => `- ${t.symbol} (${t.name}) — rank #${t.marketCapRank || 'N/A'}`).join(', ')}`;
 }
 
+// ── TradingView Signals (from webhook) ─────────────────────────────────────
+
+export interface TradingViewSignalData {
+  signals: Array<{
+    ticker: string;
+    action: string;
+    close: number | null;
+    volume: number | null;
+    interval: string | null;
+    strategy: string | null;
+    message: string | null;
+    received_at: string;
+  }>;
+  count: number;
+  available: boolean;
+}
+
+// In-memory cache for TradingView signals (5 min TTL — signals should be near-real-time)
+let tvCache: { data: TradingViewSignalData; ts: number } | null = null;
+const TV_CACHE_TTL = 5 * 60 * 1000;
+
+export async function fetchTradingViewSignals(): Promise<TradingViewSignalData> {
+  if (tvCache && Date.now() - tvCache.ts < TV_CACHE_TTL) return tvCache.data;
+
+  try {
+    // Try in-memory buffer first (imported at runtime to avoid circular deps)
+    const { getRecentSignals } = await import('@/app/api/webhooks/tradingview/route');
+    const buffered = getRecentSignals(50);
+
+    if (buffered.length > 0) {
+      const data: TradingViewSignalData = {
+        signals: buffered.map(s => ({
+          ticker: s.ticker || 'UNKNOWN',
+          action: s.action || 'alert',
+          close: s.close ?? null,
+          volume: s.volume ?? null,
+          interval: s.interval ?? null,
+          strategy: s.strategy ?? null,
+          message: s.message ?? null,
+          received_at: s.received_at,
+        })),
+        count: buffered.length,
+        available: true,
+      };
+      tvCache = { data, ts: Date.now() };
+      return data;
+    }
+
+    // Fallback: query Supabase for recent signals (last 6 hours)
+    const { createServerSupabase } = await import('@/lib/supabase');
+    const db = createServerSupabase();
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+
+    const { data: rows } = await db.from('tradingview_signals')
+      .select('ticker, action, price_close, volume, interval_tf, strategy, message, received_at')
+      .gte('received_at', sixHoursAgo)
+      .order('received_at', { ascending: false })
+      .limit(50);
+
+    const signals = (rows || []).map(r => ({
+      ticker: r.ticker || 'UNKNOWN',
+      action: r.action || 'alert',
+      close: r.price_close,
+      volume: r.volume,
+      interval: r.interval_tf,
+      strategy: r.strategy,
+      message: r.message,
+      received_at: r.received_at,
+    }));
+
+    const data: TradingViewSignalData = {
+      signals,
+      count: signals.length,
+      available: signals.length > 0,
+    };
+    tvCache = { data, ts: Date.now() };
+    return data;
+  } catch {
+    return { signals: [], count: 0, available: false };
+  }
+}
+
+/** Prompt block for AI reports */
+export function tradingViewToPromptBlock(tv: TradingViewSignalData): string {
+  if (!tv.available || tv.signals.length === 0) {
+    return 'TRADINGVIEW SIGNALS: No recent signals received.';
+  }
+
+  // Group by action type
+  const buys = tv.signals.filter(s => ['buy', 'long'].includes(s.action));
+  const sells = tv.signals.filter(s => ['sell', 'short'].includes(s.action));
+  const alerts = tv.signals.filter(s => !['buy', 'long', 'sell', 'short'].includes(s.action));
+
+  const formatSig = (s: typeof tv.signals[0]) =>
+    `- ${s.ticker} @ $${s.close?.toLocaleString() || 'N/A'} (${s.strategy || 'manual'}) ${s.interval || ''} — ${new Date(s.received_at).toLocaleTimeString()}${s.message ? ` [${s.message}]` : ''}`;
+
+  let block = `TRADINGVIEW LIVE SIGNALS (${tv.count} signals, last 6h):\n`;
+  if (buys.length > 0) block += `\nBUY/LONG Signals:\n${buys.map(formatSig).join('\n')}`;
+  if (sells.length > 0) block += `\nSELL/SHORT Signals:\n${sells.map(formatSig).join('\n')}`;
+  if (alerts.length > 0) block += `\nALERTS:\n${alerts.slice(0, 10).map(formatSig).join('\n')}`;
+
+  return block;
+}
+
 // ── Fetch All Enrichment Data ───────────────────────────────────────────────
 
 export interface EnrichedData {
@@ -451,17 +555,19 @@ export interface EnrichedData {
   finnhub: FinnhubData;
   fearGreed: FearGreedData | null;
   coinGecko: CoinGeckoData;
+  tradingView: TradingViewSignalData;
 }
 
 /** Fetch all enriched data in parallel. Safe to call frequently — cached. */
 export async function fetchAllEnrichedData(): Promise<EnrichedData> {
-  const [fred, finnhub, fearGreed, coinGecko] = await Promise.all([
+  const [fred, finnhub, fearGreed, coinGecko, tradingView] = await Promise.all([
     fetchFredData(),
     fetchFinnhubData(),
     fetchFearGreedIndex(),
     fetchCoinGeckoData(),
+    fetchTradingViewSignals(),
   ]);
-  return { fred, finnhub, fearGreed, coinGecko };
+  return { fred, finnhub, fearGreed, coinGecko, tradingView };
 }
 
 /** Build a combined macro context block for AI prompts */
@@ -471,5 +577,6 @@ export function enrichedDataToPromptBlock(data: EnrichedData): string {
     fearGreedToPromptBlock(data.fearGreed),
     finnhubToPromptBlock(data.finnhub),
     coinGeckoToPromptBlock(data.coinGecko),
+    tradingViewToPromptBlock(data.tradingView),
   ].join('\n\n');
 }
