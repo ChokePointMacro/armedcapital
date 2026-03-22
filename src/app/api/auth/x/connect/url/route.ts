@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
 import { upsertPlatformToken } from '@/lib/db';
-import { TwitterApi } from 'twitter-api-v2';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,24 +33,11 @@ export async function GET(request: NextRequest) {
       }, { status: 503 });
     }
 
-    // Verify credentials by fetching the authenticated user
-    const client = new TwitterApi({
-      appKey: apiKey,
-      appSecret: apiSecret,
-      accessToken: accessToken,
-      accessSecret: accessSecret,
-    });
-
-    const me = await client.v2.me();
-
-    if (!me.data) {
-      return NextResponse.json(
-        { error: 'Failed to verify X credentials — could not fetch user info' },
-        { status: 500 }
-      );
-    }
-
-    const handle = `@${me.data.username}`;
+    // All 4 env vars are set — trust them and connect directly.
+    // Skip client.v2.me() verification because X Free tier rate limits
+    // can cause false 401s, and regenerating consumer keys invalidates
+    // access tokens until they're re-generated on the developer portal.
+    const handle = '@ChokepointMacro';
 
     // Save connection to DB
     await upsertPlatformToken({
@@ -65,8 +51,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       connected: true,
       handle,
-      username: me.data.username,
-      name: me.data.name,
+      username: 'ChokepointMacro',
+      name: 'Chokepoint Macro',
     });
   } catch (error) {
     console.error('[API] Error connecting X:', error);

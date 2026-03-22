@@ -424,6 +424,76 @@ async function checkCoinGecko(): Promise<ServiceStatus> {
   }
 }
 
+// ── Consumption data queries ─────────────────────────────────────────────────
+
+async function getConsumptionData() {
+  try {
+    const { createServerSupabase } = await import('@/lib/supabase');
+    const db = createServerSupabase();
+
+    // Get today's date and this week's start
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // ── Reports analytics (reports table uses updated_at, not created_at)
+    const { data: allReports } = await db.from('reports').select('id, type, updated_at');
+    const reports = {
+      total: allReports?.length ?? 0,
+      today: allReports?.filter(r => r.updated_at && r.updated_at >= today).length ?? 0,
+      thisWeek: allReports?.filter(r => r.updated_at && r.updated_at >= weekStart).length ?? 0,
+      byType: {} as Record<string, number>,
+    };
+
+    // Count by type
+    if (allReports) {
+      for (const report of allReports) {
+        if (report.type) {
+          reports.byType[report.type] = (reports.byType[report.type] ?? 0) + 1;
+        }
+      }
+    }
+
+    // ── Posts analytics
+    const { data: allPosts } = await db.from('scheduled_posts').select('id, status, created_at');
+    const posts = {
+      total: allPosts?.length ?? 0,
+      posted: allPosts?.filter(p => p.status === 'posted').length ?? 0,
+      pending: allPosts?.filter(p => p.status === 'pending').length ?? 0,
+      failed: allPosts?.filter(p => p.status === 'failed').length ?? 0,
+      thisWeek: allPosts?.filter(p => p.created_at && p.created_at >= weekStart).length ?? 0,
+    };
+
+    // ── Scheduled reports
+    const { data: scheduledReports } = await db.from('scheduled_reports').select('id, enabled');
+    const scheduledReportsInfo = {
+      active: scheduledReports?.filter(r => r.enabled === true).length ?? 0,
+      total: scheduledReports?.length ?? 0,
+    };
+
+    // ── Connected platforms
+    const { data: platformTokens } = await db.from('platform_tokens').select('platform');
+    const connectedPlatforms = Array.from(new Set(
+      platformTokens?.map(p => p.platform).filter(Boolean) ?? []
+    )) as string[];
+
+    return {
+      reports,
+      posts,
+      scheduledReports: scheduledReportsInfo,
+      connectedPlatforms,
+    };
+  } catch (err) {
+    console.error('[API] Consumption data error:', err);
+    return {
+      reports: { total: 0, today: 0, thisWeek: 0, byType: {} },
+      posts: { total: 0, posted: 0, pending: 0, failed: 0, thisWeek: 0 },
+      scheduledReports: { active: 0, total: 0 },
+      connectedPlatforms: [],
+    };
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export async function GET() {
@@ -431,7 +501,7 @@ export async function GET() {
     await safeAuth();
 
     // Run live checks in parallel — original + new enrichment sources
-    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko] = await Promise.all([
+    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko, consumption] = await Promise.all([
       checkAnthropic(),
       checkOpenAI(),
       checkGemini(),
@@ -441,6 +511,7 @@ export async function GET() {
       checkFinnhub(),
       checkFearGreed(),
       checkCoinGecko(),
+      getConsumptionData(),
     ]);
 
     // Static checks (no network call needed)
@@ -468,7 +539,7 @@ export async function GET() {
       ),
     };
 
-    return NextResponse.json({ services, summary, checkedAt: new Date().toISOString() });
+    return NextResponse.json({ services, summary, consumption, checkedAt: new Date().toISOString() });
   } catch (err) {
     console.error('[API] Usage check error:', err);
     return NextResponse.json({ error: 'Failed to check usage' }, { status: 500 });

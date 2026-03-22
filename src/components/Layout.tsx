@@ -20,6 +20,8 @@ const NAV_ITEMS = [
   { to: '/scanner', label: 'Scanner' },
   { to: '/trade-flow', label: 'Trade Flow' },
   { to: '/usage', label: 'Usage' },
+  { to: '/agents', label: 'Agents' },
+  { to: '/org', label: 'Org' },
 ];
 
 const AUTH_NAV_ITEMS = [

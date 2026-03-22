@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Loader2, Wifi, WifiOff, Zap, Clock, AlertTriangle, CheckCircle2, XCircle, Activity } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { ApiKeyManager } from './ApiKeyManager';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,9 +30,31 @@ interface ServiceStatus {
   limits: ServiceLimits | null;
 }
 
+interface ConsumptionData {
+  reports: {
+    total: number;
+    today: number;
+    thisWeek: number;
+    byType: Record<string, number>;
+  };
+  posts: {
+    total: number;
+    posted: number;
+    pending: number;
+    failed: number;
+    thisWeek: number;
+  };
+  scheduledReports: {
+    active: number;
+    total: number;
+  };
+  connectedPlatforms: string[];
+}
+
 interface UsageData {
   services: ServiceStatus[];
   summary: { total: number; connected: number; disconnected: number; avgLatencyMs: number };
+  consumption?: ConsumptionData;
   checkedAt: string;
 }
 
@@ -214,6 +237,74 @@ export function Usage({ user }: { user: any }) {
         </button>
       </div>
 
+      {/* Platform Analytics */}
+      {data && data.consumption && (
+        <div className="mb-6">
+          <h2 className="text-[11px] font-mono text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <span className="h-px flex-1 bg-gray-800" />
+            Platform Analytics
+            <span className="h-px flex-1 bg-gray-800" />
+          </h2>
+
+          {/* Stats cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+              <div className="text-[10px] font-mono text-gray-600 uppercase tracking-wider">Total Reports</div>
+              <div className="text-xl font-mono text-btc-orange mt-1">{data.consumption.reports.total}</div>
+              <div className="text-[9px] font-mono text-gray-700 mt-1">Today: {data.consumption.reports.today}</div>
+            </div>
+            <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+              <div className="text-[10px] font-mono text-gray-600 uppercase tracking-wider">Posts Published</div>
+              <div className="text-xl font-mono text-green-400 mt-1">{data.consumption.posts.posted}</div>
+              <div className="text-[9px] font-mono text-gray-700 mt-1">Pending: {data.consumption.posts.pending}</div>
+            </div>
+            <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+              <div className="text-[10px] font-mono text-gray-600 uppercase tracking-wider">Active Schedules</div>
+              <div className="text-xl font-mono text-yellow-400 mt-1">{data.consumption.scheduledReports.active}</div>
+              <div className="text-[9px] font-mono text-gray-700 mt-1">Total: {data.consumption.scheduledReports.total}</div>
+            </div>
+            <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+              <div className="text-[10px] font-mono text-gray-600 uppercase tracking-wider">Connected Platforms</div>
+              <div className="text-xl font-mono text-purple-400 mt-1">{data.consumption.connectedPlatforms.length}</div>
+              <div className="text-[9px] font-mono text-gray-700 mt-1 truncate">{data.consumption.connectedPlatforms.join(', ') || 'None'}</div>
+            </div>
+          </div>
+
+          {/* Report breakdown by type */}
+          {Object.keys(data.consumption.reports.byType).length > 0 && (
+            <div className="border border-gray-800 rounded-lg p-4 bg-gray-900/60 mb-4">
+              <div className="text-[10px] font-mono text-gray-600 uppercase tracking-wider mb-3">Report Types</div>
+              <div className="space-y-2">
+                {Object.entries(data.consumption.reports.byType).map(([type, count]) => {
+                  const total = data.consumption!.reports.total;
+                  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                  const COLOR_MAP: Record<string, string> = {
+                    global: 'bg-blue-400',
+                    crypto: 'bg-btc-orange',
+                    equities: 'bg-green-400',
+                    nasdaq: 'bg-purple-400',
+                    conspiracies: 'bg-red-400',
+                    forecast: 'bg-yellow-400',
+                    custom: 'bg-teal-400',
+                    china: 'bg-red-500',
+                  };
+                  const barColor = COLOR_MAP[type] || 'bg-gray-600';
+                  return (
+                    <div key={type} className="flex items-center gap-3">
+                      <span className="text-[10px] font-mono text-gray-400 w-16">{type}</span>
+                      <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+                        <div className={`h-full ${barColor} shadow-[0_0_6px_rgba(0,0,0,0.4)]`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-500 w-12 text-right">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Summary bar */}
       {data && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -336,6 +427,13 @@ export function Usage({ user }: { user: any }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* API Key Manager */}
+      {data && (
+        <div className="mt-6 border-t border-gray-800 pt-6">
+          <ApiKeyManager />
         </div>
       )}
     </div>
