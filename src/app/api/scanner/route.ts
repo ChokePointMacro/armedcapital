@@ -3,7 +3,6 @@ import { safeAuth } from '@/lib/authHelper';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   fetchAllEnrichedData, enrichedDataToPromptBlock,
-  type FredData, type FinnhubData, type FearGreedData, type CoinGeckoData, type EnrichedData,
 } from '@/lib/enrichedData';
 
 // ── Cache ────────────────────────────────────────────────────────────────────
