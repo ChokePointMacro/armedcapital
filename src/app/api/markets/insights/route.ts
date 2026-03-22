@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, fetchFinnhubData,
+  fredToPromptBlock, fearGreedToPromptBlock, coinGeckoToPromptBlock, finnhubToPromptBlock,
+} from '@/lib/enrichedData';
 
 const MARKET_INSTRUMENTS = [
   { symbol: 'BTC', name: 'Bitcoin', type: 'CRYPTO', isCrypto: true },
@@ -29,7 +33,7 @@ const YAHOO_MAP: Record<string, string> = {
   AMD: 'AMD',
 };
 
-let insightsCache: { text: string; ts: number } | null = null;
+let insightsCache: { text: string; enrichment: any; ts: number } | null = null;
 const INSIGHTS_TTL = 10 * 60 * 1000; // 10 minutes
 
 let cachedToken: string | null = null;
@@ -59,13 +63,22 @@ export async function GET(request: NextRequest) {
     if (insightsCache && Date.now() - insightsCache.ts < INSIGHTS_TTL) {
       return NextResponse.json({
         text: insightsCache.text,
+        enrichment: insightsCache.enrichment,
         cached: true,
         generatedAt: new Date(insightsCache.ts).toISOString(),
       });
     }
 
-    // Gather live prices
-    const token = await getPublicToken();
+    // Fetch live prices + enrichment data in parallel
+    const tokenPromise = getPublicToken();
+    const enrichmentPromise = Promise.all([
+      fetchFredData(),
+      fetchFearGreedIndex(),
+      fetchCoinGeckoData(),
+      fetchFinnhubData(),
+    ]);
+
+    const token = await tokenPromise;
     const accountId = process.env.PUBLIC_ACCOUNT_ID!;
 
     if (!token || !accountId) {
@@ -136,17 +149,25 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    // Build a compact data snapshot for the prompt
+    // Get enrichment data
+    const [fred, fearGreed, coinGecko, finnhub] = await enrichmentPromise;
+
+    // Build compact data snapshot for prompt
     const lines = MARKET_INSTRUMENTS.map(inst => {
       const q = quoteMap[inst.symbol] || {};
       const price = q.last != null ? parseFloat(q.last) : null;
       const h = historyData.find(d => d.sym === inst.symbol);
       const pct30 = h?.open30 && price ? ((price - h.open30) / h.open30 * 100).toFixed(1) : '?';
       const pivot = h?.pivot ? `P=${h.pivot.p.toFixed(0)} S1=${h.pivot.s1.toFixed(0)} R1=${h.pivot.r1.toFixed(0)}` : '';
-      const priceStr = price != null ? (inst.isIndex ? price.toFixed(0) : `$${price.toFixed(2)}`) : 'N/A';
+      const priceStr = price != null ? ((inst as any).isIndex ? price.toFixed(0) : `$${price.toFixed(2)}`) : 'N/A';
       const rangeStr = h?.hi30 ? `30d range $${h.lo30?.toFixed(0)}–$${h.hi30?.toFixed(0)}` : '';
       return `${inst.symbol} (${inst.name}): ${priceStr} | ${pct30}% vs 30d ago | ${rangeStr} | ${pivot}`;
     });
+
+    const fredBlock = fredToPromptBlock(fred);
+    const fgBlock = fearGreedToPromptBlock(fearGreed);
+    const cryptoBlock = coinGeckoToPromptBlock(coinGecko);
+    const earningsBlock = finnhubToPromptBlock(finnhub);
 
     const now = new Date().toUTCString();
     const prompt = `You are a sharp, concise macro/markets analyst. Today is ${now}.
@@ -154,10 +175,20 @@ export async function GET(request: NextRequest) {
 Here is live market data:
 ${lines.join('\n')}
 
-Write a tight, actionable market insights brief (aim for ~300 words). Structure it as:
-1. **Overall Tone** — one sentence: risk-on, risk-off, or mixed? Why?
-2. **Key Setups** — 3–5 bullet points, each covering a specific instrument or theme. Call out pivot levels, breakout/breakdown risks, relative strength/weakness, and what to watch.
-3. **Watch List** — 2–3 specific price levels or catalysts that will define the next move.
+${fredBlock}
+
+${fgBlock}
+
+${cryptoBlock}
+
+${earningsBlock}
+
+Write a tight, actionable market insights brief (aim for ~400 words). Structure it as:
+1. **Overall Tone** — one sentence: risk-on, risk-off, or mixed? Reference Fear & Greed, yield curve stance, and inflation expectations.
+2. **Key Setups** — 3–5 bullet points, each covering a specific instrument or theme. Call out pivot levels, breakout/breakdown risks, relative strength/weakness. Reference FRED yield data and CoinGecko crypto data where relevant.
+3. **Earnings Watch** — any major earnings this week that could impact markets? Reference Finnhub data.
+4. **Crypto Pulse** — BTC dominance, trending coins, any notable volume/momentum shifts from CoinGecko.
+5. **Watch List** — 2–3 specific price levels or catalysts that will define the next move.
 
 Be direct. No filler. Use the actual numbers from the data. Format in markdown.`;
 
@@ -165,14 +196,30 @@ Be direct. No filler. Use the actual numbers from the data. Format in markdown.`
     const anthropic = new Anthropic();
     const msg = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 600,
+      max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     });
 
     const text = (msg.content[0] as any).text as string;
-    insightsCache = { text, ts: Date.now() };
+
+    // Build enrichment summary for frontend
+    const enrichment = {
+      fearGreed: fearGreed ? { value: fearGreed.value, label: fearGreed.label } : null,
+      yieldCurve: fred.available ? {
+        spread2s10s: fred.spread2s10s,
+        tenYear: fred.yieldCurve.find(y => y.series === 'DGS10')?.value,
+      } : null,
+      cryptoGlobal: coinGecko.available ? {
+        btcDominance: coinGecko.btcDominance,
+        totalMarketCap: coinGecko.globalMarketCap,
+      } : null,
+      earningsCount: finnhub.earningsThisWeek.length,
+    };
+
+    insightsCache = { text, enrichment, ts: Date.now() };
     return NextResponse.json({
       text,
+      enrichment,
       cached: false,
       generatedAt: new Date().toISOString(),
     });

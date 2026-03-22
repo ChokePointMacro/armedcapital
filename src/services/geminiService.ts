@@ -1,6 +1,10 @@
 import { generateReportWithFallback, parseJSONResponse } from "./aiService";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
+import {
+  fetchAllEnrichedData, enrichedDataToPromptBlock,
+  fredToPromptBlock, fearGreedToPromptBlock, coinGeckoToPromptBlock, finnhubToPromptBlock,
+} from '@/lib/enrichedData';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -450,8 +454,12 @@ export async function generateSpeculationReport(onProgress?: ProgressCallback): 
   const windowStart = formatDateOffset(windowDays);
 
   onProgress?.('Fetching Reddit & StockTwits...', 10);
-  console.log('[generateSpeculationReport] Fetching Reddit + StockTwits...');
-  const liveContext = await fetchSpeculationContext(windowDays);
+  console.log('[generateSpeculationReport] Fetching Reddit + StockTwits + enrichment...');
+  const [liveContext, specEnrichment] = await Promise.all([
+    fetchSpeculationContext(windowDays),
+    fetchAllEnrichedData(),
+  ]);
+  const specEnrichmentBlock = enrichedDataToPromptBlock(specEnrichment);
   const specSources: SourceStatus[] = [
     { name: 'Reddit', url: 'reddit.com', status: liveContext.includes('REDDIT LIVE FEED') ? 'ok' : 'error', articles: (liveContext.match(/\[\d+\]/g) || []).length },
     { name: 'StockTwits', url: 'stocktwits.com', status: liveContext.includes('STOCKTWITS TRENDING') ? 'ok' : 'error' },
@@ -468,7 +476,11 @@ CRITICAL — DATA SOURCE RULES:
 
 ${liveContext}
 
-TASK: From the posts above, extract exactly 20 of the highest-signal speculation items covering: merger/acquisition rumours, product leaks, earnings surprises, geopolitical speculation, currency moves, crypto catalysts, and notable viral business narratives.
+--- LIVE MARKET & MACRO DATA (use for context) ---
+${specEnrichmentBlock}
+--- END MARKET DATA ---
+
+TASK: From the posts above AND the market/macro data, extract exactly 20 of the highest-signal speculation items covering: merger/acquisition rumours, product leaks, earnings surprises, geopolitical speculation, currency moves, crypto catalysts, and notable viral business narratives.
 
 PRIORITY RANKING — weight by:
 1. Upvote score × comment count (community conviction)
@@ -561,8 +573,13 @@ export async function generateForecastReport(onProgress?: ProgressCallback): Pro
   });
 
   onProgress?.('Fetching news sources...', 10);
-  console.log('[generateForecastReport] Fetching live news context...');
-  const { text: liveContext, sources: sourceStatuses } = await fetchNewsContext('global', 7);
+  console.log('[generateForecastReport] Fetching live news + enrichment...');
+  const [newsResult, enrichment] = await Promise.all([
+    fetchNewsContext('global', 7),
+    fetchAllEnrichedData(),
+  ]);
+  const { text: liveContext, sources: sourceStatuses } = newsResult;
+  const forecastEnrichment = enrichedDataToPromptBlock(enrichment);
   onProgress?.('Filtering & scoring articles...', 25, sourceStatuses);
 
   const prompt = `You are a senior geopolitical risk analyst and macro strategist. Today is ${currentDate}. Your forward planning window is ${currentDate} through ${sevenDaysOut}.
@@ -574,7 +591,11 @@ CRITICAL — DATA SOURCE RULES:
 
 ${liveContext}
 
-TASK: Using the live news above, identify exactly 10 upcoming events, decisions, or catalysts within the next 7 days that carry the highest potential to move financial markets or escalate/de-escalate geopolitical tension. These must be REAL scheduled or anticipated events — central bank decisions, earnings, elections, summits, treaty deadlines, sanctions reviews, military exercises, etc.
+--- LIVE MARKET & MACRO DATA (use for context and accuracy) ---
+${forecastEnrichment}
+--- END MARKET DATA ---
+
+TASK: Using the live news above AND the market/macro data, identify exactly 10 upcoming events, decisions, or catalysts within the next 7 days that carry the highest potential to move financial markets or escalate/de-escalate geopolitical tension. These must be REAL scheduled or anticipated events — central bank decisions, earnings, elections, summits, treaty deadlines, sanctions reviews, military exercises, etc.
 
 For each event, provide a rigorous probabilistic assessment and dual-outcome impact analysis.
 
@@ -651,10 +672,15 @@ export async function generateWeeklyReport(type: string = 'global', customTopic?
   const windowDays = cfg.isConspiracy ? 30 : 7;
   const windowStart = formatDateOffset(windowDays);
 
-  // Fetch live RSS articles before calling the AI
+  // Fetch live RSS articles + enrichment data in parallel
   onProgress?.('Fetching news sources...', 10);
-  console.log(`[generateWeeklyReport] Fetching live news for ${type}...`);
-  const { text: liveNewsContext, sources: sourceStatuses } = await fetchNewsContext(type, windowDays);
+  console.log(`[generateWeeklyReport] Fetching live news + enrichment for ${type}...`);
+  const [newsResult, enrichment] = await Promise.all([
+    fetchNewsContext(type, windowDays),
+    fetchAllEnrichedData(),
+  ]);
+  const { text: liveNewsContext, sources: sourceStatuses } = newsResult;
+  const enrichmentBlock = enrichedDataToPromptBlock(enrichment);
   onProgress?.('Filtering & scoring articles...', 25, sourceStatuses);
 
   const conspiracyAddition = cfg.isConspiracy
@@ -688,7 +714,11 @@ CRITICAL INSTRUCTION — DATA SOURCE RULES:
 
 ${liveNewsContext}
 
-TASK: Using ONLY the live news articles above, generate exactly 20 headlines of MAJOR news events ${cfg.timeframeDescriptor}.
+--- LIVE MARKET & MACRO DATA (use to add context and accuracy to your analysis) ---
+${enrichmentBlock}
+--- END MARKET DATA ---
+
+TASK: Using the live news articles above AND the market/macro data, generate exactly 20 headlines of MAJOR news events ${cfg.timeframeDescriptor}.
 Topic scope: ${cfg.topicFocus}
 
 ${mandatoryAreas}

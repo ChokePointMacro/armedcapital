@@ -37,6 +37,35 @@ interface Opportunity {
   scoringBreakdown: ScoringBreakdown;
 }
 
+interface FearGreedInfo {
+  value: number;
+  label: string;
+  previousClose: number;
+  oneWeekAgo: number;
+  oneMonthAgo: number;
+}
+
+interface FredSummary {
+  spread2s10s: number | null;
+  breakeven10y: number | null;
+  fedFundsRate: number | null;
+  yieldCurve: { label: string; value: number | null }[];
+}
+
+interface CryptoGlobal {
+  btcDominance: number | null;
+  totalMarketCap: number | null;
+}
+
+interface DataSources {
+  publicCom: number;
+  yahooChart: number;
+  fred: boolean;
+  finnhub: boolean;
+  fearGreed: boolean;
+  coinGecko: number;
+}
+
 interface ScanResult {
   opportunities: Opportunity[];
   marketContext: string;
@@ -45,6 +74,11 @@ interface ScanResult {
   nextScanAt: string;
   instrumentsScanned: number;
   error?: string;
+  fearGreed?: FearGreedInfo | null;
+  fredSummary?: FredSummary | null;
+  earningsCount?: number;
+  cryptoGlobal?: CryptoGlobal | null;
+  dataSources?: DataSources;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -362,6 +396,89 @@ export function Scanner({ user }: { user: any }) {
                   Scanned {new Date(data.scannedAt).toLocaleTimeString()}
                 </span>
               </div>
+            </div>
+          )}
+
+          {/* Enrichment panels */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            {/* Fear & Greed */}
+            {data.fearGreed && (
+              <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+                <div className="text-[10px] font-mono text-gray-600 uppercase mb-1">Fear & Greed</div>
+                <div className={`text-xl font-mono font-bold ${
+                  data.fearGreed.value <= 25 ? 'text-red-400' :
+                  data.fearGreed.value <= 44 ? 'text-orange-400' :
+                  data.fearGreed.value <= 55 ? 'text-yellow-400' :
+                  data.fearGreed.value <= 75 ? 'text-green-400' : 'text-emerald-400'
+                }`}>{data.fearGreed.value}</div>
+                <div className="text-[9px] font-mono text-gray-500 mt-0.5">{data.fearGreed.label}</div>
+                <div className="text-[8px] font-mono text-gray-700 mt-1">
+                  1w: {data.fearGreed.oneWeekAgo} · 1m: {data.fearGreed.oneMonthAgo}
+                </div>
+              </div>
+            )}
+            {/* Yield Curve */}
+            {data.fredSummary && (
+              <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+                <div className="text-[10px] font-mono text-gray-600 uppercase mb-1">2s10s Spread</div>
+                <div className={`text-xl font-mono font-bold ${
+                  data.fredSummary.spread2s10s != null && data.fredSummary.spread2s10s < 0 ? 'text-red-400' :
+                  data.fredSummary.spread2s10s != null && data.fredSummary.spread2s10s < 0.2 ? 'text-yellow-400' : 'text-green-400'
+                }`}>
+                  {data.fredSummary.spread2s10s != null ? `${data.fredSummary.spread2s10s.toFixed(2)}%` : '—'}
+                </div>
+                <div className="text-[9px] font-mono text-gray-500 mt-0.5">
+                  {data.fredSummary.spread2s10s != null && data.fredSummary.spread2s10s < 0 ? 'Inverted' : 'Normal'}
+                </div>
+                <div className="text-[8px] font-mono text-gray-700 mt-1">
+                  {data.fredSummary.yieldCurve.map(y => `${y.label}: ${y.value != null ? y.value.toFixed(1) + '%' : '—'}`).join(' · ')}
+                </div>
+              </div>
+            )}
+            {/* Crypto Global */}
+            {data.cryptoGlobal && (
+              <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+                <div className="text-[10px] font-mono text-gray-600 uppercase mb-1">BTC Dominance</div>
+                <div className="text-xl font-mono font-bold text-btc-orange">
+                  {data.cryptoGlobal.btcDominance != null ? `${data.cryptoGlobal.btcDominance}%` : '—'}
+                </div>
+                <div className="text-[9px] font-mono text-gray-500 mt-0.5">
+                  MCap: {data.cryptoGlobal.totalMarketCap ? `$${(data.cryptoGlobal.totalMarketCap / 1e12).toFixed(2)}T` : '—'}
+                </div>
+              </div>
+            )}
+            {/* Earnings */}
+            {data.earningsCount != null && data.earningsCount > 0 && (
+              <div className="border border-gray-800 rounded-lg p-3 bg-gray-900/60">
+                <div className="text-[10px] font-mono text-gray-600 uppercase mb-1">Earnings This Week</div>
+                <div className="text-xl font-mono font-bold text-yellow-400">{data.earningsCount}</div>
+                <div className="text-[9px] font-mono text-gray-500 mt-0.5">Reports upcoming</div>
+              </div>
+            )}
+          </div>
+
+          {/* Data sources bar */}
+          {data.dataSources && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <span className="text-[8px] font-mono text-gray-700 uppercase">Sources:</span>
+              {data.dataSources.publicCom > 0 && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-green-500/10 text-green-500 border border-green-500/20">Public.com ({data.dataSources.publicCom})</span>
+              )}
+              {data.dataSources.yahooChart > 0 && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-500 border border-purple-500/20">Yahoo ({data.dataSources.yahooChart})</span>
+              )}
+              {data.dataSources.fred && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">FRED</span>
+              )}
+              {data.dataSources.finnhub && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">Finnhub</span>
+              )}
+              {data.dataSources.fearGreed && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500 border border-orange-500/20">F&G Index</span>
+              )}
+              {data.dataSources.coinGecko > 0 && (
+                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">CoinGecko ({data.dataSources.coinGecko})</span>
+              )}
             </div>
           )}
 

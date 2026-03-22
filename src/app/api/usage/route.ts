@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
+import { fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, fetchFinnhubData } from '@/lib/enrichedData';
 
 // ── Known rate limits per service ────────────────────────────────────────────
 
@@ -321,19 +322,122 @@ function checkVercel(): ServiceStatus {
   };
 }
 
+// ── NEW: Enrichment data source checks ───────────────────────────────────────
+
+async function checkFRED(): Promise<ServiceStatus> {
+  const key = process.env.FRED_API_KEY;
+  if (!key) return { name: 'FRED (Federal Reserve)', category: 'data', connected: false, latencyMs: null, error: 'FRED_API_KEY not set', limits: null };
+
+  const start = Date.now();
+  try {
+    const data = await fetchFredData();
+    const latency = Date.now() - start;
+    return {
+      name: 'FRED (Federal Reserve)',
+      category: 'data',
+      connected: data.available,
+      latencyMs: latency,
+      error: data.available ? null : 'No data returned',
+      limits: {
+        label: 'Economic Data API',
+        tier: 'Free',
+        requests: { used: null, max: 120, window: 'per minute' },
+        notes: 'Free tier: 120 req/min. Provides yield curve, breakevens, claims, fed funds rate.',
+      },
+    };
+  } catch (err) {
+    return { name: 'FRED (Federal Reserve)', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
+async function checkFinnhub(): Promise<ServiceStatus> {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key) return { name: 'Finnhub', category: 'data', connected: false, latencyMs: null, error: 'FINNHUB_API_KEY not set', limits: null };
+
+  const start = Date.now();
+  try {
+    const data = await fetchFinnhubData();
+    const latency = Date.now() - start;
+    return {
+      name: 'Finnhub',
+      category: 'data',
+      connected: data.available || !!key, // Key set = connected, data may just be empty on weekends
+      latencyMs: latency,
+      error: null,
+      limits: {
+        label: 'Earnings & Insider Data',
+        tier: 'Free',
+        requests: { used: null, max: 60, window: 'per minute' },
+        notes: 'Free tier: 60 req/min. Provides earnings calendar, insider transactions, company news.',
+      },
+    };
+  } catch (err) {
+    return { name: 'Finnhub', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
+async function checkFearGreed(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const data = await fetchFearGreedIndex();
+    const latency = Date.now() - start;
+    return {
+      name: 'CNN Fear & Greed',
+      category: 'data',
+      connected: !!data,
+      latencyMs: latency,
+      error: data ? null : 'Could not fetch index',
+      limits: data ? {
+        label: 'Sentiment Index',
+        tier: 'Public endpoint',
+        notes: `No auth required. Current reading: ${data.value}/100 — ${data.label}`,
+      } : null,
+    };
+  } catch (err) {
+    return { name: 'CNN Fear & Greed', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
+async function checkCoinGecko(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const data = await fetchCoinGeckoData();
+    const latency = Date.now() - start;
+    return {
+      name: 'CoinGecko',
+      category: 'data',
+      connected: data.available,
+      latencyMs: latency,
+      error: data.available ? null : 'API returned no data',
+      limits: {
+        label: 'Crypto Market Data',
+        tier: 'Free',
+        requests: { used: null, max: 30, window: 'per minute' },
+        notes: `Free tier: 10-30 req/min. Tracking ${data.topCoins.length} coins. BTC dominance: ${data.btcDominance ?? 'N/A'}%.`,
+      },
+    };
+  } catch (err) {
+    return { name: 'CoinGecko', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export async function GET() {
   try {
     await safeAuth();
 
-    // Run live checks in parallel
-    const [anthropic, openai, gemini, supabase, publicApi] = await Promise.all([
+    // Run live checks in parallel — original + new enrichment sources
+    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko] = await Promise.all([
       checkAnthropic(),
       checkOpenAI(),
       checkGemini(),
       checkSupabase(),
       checkPublicAPI(),
+      checkFRED(),
+      checkFinnhub(),
+      checkFearGreed(),
+      checkCoinGecko(),
     ]);
 
     // Static checks (no network call needed)
@@ -346,7 +450,7 @@ export async function GET() {
 
     const services: ServiceStatus[] = [
       anthropic, openai, gemini,
-      publicApi, yahoo,
+      publicApi, yahoo, fred, finnhub, fearGreed, coinGecko,
       supabase, redis, pinecone, vercel, resend,
       twitter,
     ];
