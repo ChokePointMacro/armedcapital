@@ -5,6 +5,7 @@
 
 export const ADMIN_EMAILS: string[] = [
   'm@aol.com',
+  'michael.nield7@gmail.com',
   // Add additional admin emails here
 ];
 

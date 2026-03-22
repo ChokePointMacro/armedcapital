@@ -68,26 +68,34 @@ export async function GET(req: NextRequest) {
       }));
 
     // ── Source 2: Supabase agent_tasks (actual_cost) ────────────────────
-    const { data: tasks } = await supabase
-      .from('agent_tasks')
-      .select('agent_id, actual_cost, estimated_cost, completed_at, updated_at, status')
-      .gte('updated_at', since)
-      .in('status', ['completed', 'failed'])
-      .order('updated_at', { ascending: false })
-      .limit(1000);
+    // Gracefully handle missing table — Supabase returns error if table doesn't exist
+    let taskSpend: SpendEntry[] = [];
+    try {
+      const { data: tasks, error: taskError } = await supabase
+        .from('agent_tasks')
+        .select('agent_id, actual_cost, estimated_cost, completed_at, updated_at, status')
+        .gte('updated_at', since)
+        .in('status', ['completed', 'failed'])
+        .order('updated_at', { ascending: false })
+        .limit(1000);
 
-    const taskSpend: SpendEntry[] = (tasks || []).map((t: any) => {
-      const costStr = (t.actual_cost || t.estimated_cost || '$0').replace('$', '');
-      const cost = parseFloat(costStr) || 0;
-      return {
-        agentId: t.agent_id,
-        model: 'from-task',
-        costUsd: cost,
-        tokens: 0,
-        latencyMs: 0,
-        timestamp: t.completed_at || t.updated_at,
-      };
-    });
+      if (!taskError && tasks) {
+        taskSpend = tasks.map((t: any) => {
+          const costStr = (t.actual_cost || t.estimated_cost || '$0').replace('$', '');
+          const cost = parseFloat(costStr) || 0;
+          return {
+            agentId: t.agent_id,
+            model: 'from-task',
+            costUsd: cost,
+            tokens: 0,
+            latencyMs: 0,
+            timestamp: t.completed_at || t.updated_at,
+          };
+        });
+      }
+    } catch {
+      // Table may not exist yet — continue with in-memory data only
+    }
 
     // Merge all spend data
     const allSpend = [...spendEntries, ...taskSpend];
