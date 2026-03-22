@@ -898,6 +898,70 @@ export function tradingViewToPromptBlock(tv: TradingViewSignalData): string {
   return block;
 }
 
+// ── TradingView Real-Time Quotes (WebSocket) ─────────────────────────────────
+
+export interface TVLiveQuotes {
+  quotes: Array<{
+    symbol: string;
+    price: number | null;
+    change: number | null;
+    changePercent: number | null;
+    volume: number | null;
+    high: number | null;
+    low: number | null;
+  }>;
+  connected: boolean;
+  authenticated: boolean;
+  available: boolean;
+}
+
+let tvQuotesCache: { data: TVLiveQuotes; ts: number } | null = null;
+const TV_QUOTES_CACHE_TTL = 60_000; // 1 minute
+
+export async function fetchTVLiveQuotes(): Promise<TVLiveQuotes> {
+  if (tvQuotesCache && Date.now() - tvQuotesCache.ts < TV_QUOTES_CACHE_TTL) return tvQuotesCache.data;
+
+  try {
+    const { fetchQuotes, getConnectionStatus, DEFAULT_SYMBOLS } = await import('@/lib/tradingviewWS');
+    const quotes = await fetchQuotes(DEFAULT_SYMBOLS, 3000);
+    const status = getConnectionStatus();
+
+    const data: TVLiveQuotes = {
+      quotes: quotes.map(q => ({
+        symbol: q.symbol,
+        price: q.price,
+        change: q.change,
+        changePercent: q.changePercent,
+        volume: q.volume,
+        high: q.high,
+        low: q.low,
+      })),
+      connected: status.connected,
+      authenticated: status.authenticated,
+      available: quotes.length > 0,
+    };
+    tvQuotesCache = { data, ts: Date.now() };
+    return data;
+  } catch {
+    return { quotes: [], connected: false, authenticated: false, available: false };
+  }
+}
+
+function tvQuotesToPromptBlock(quotes: TVLiveQuotes): string {
+  if (!quotes.available || quotes.quotes.length === 0) {
+    return 'TRADINGVIEW LIVE QUOTES: No real-time data available.';
+  }
+
+  const lines = quotes.quotes.map(q => {
+    const price = q.price != null ? `$${q.price.toLocaleString()}` : 'N/A';
+    const chg = q.changePercent != null ? `${q.changePercent >= 0 ? '+' : ''}${q.changePercent.toFixed(2)}%` : '';
+    const vol = q.volume != null ? `vol: ${(q.volume / 1e6).toFixed(1)}M` : '';
+    return `- ${q.symbol}: ${price} ${chg} ${vol}`.trim();
+  });
+
+  return `TRADINGVIEW REAL-TIME QUOTES (${quotes.authenticated ? 'Plus — no delay' : 'free — 10min delay'}):\n${lines.join('\n')}`;
+}
+
 // ── Fetch All Enrichment Data ───────────────────────────────────────────────
 
 export interface EnrichedData {
@@ -906,6 +970,7 @@ export interface EnrichedData {
   fearGreed: FearGreedData | null;
   coinGecko: CoinGeckoData;
   tradingView: TradingViewSignalData;
+  tvLiveQuotes: TVLiveQuotes;
   bls: BlsData;
   cftc: CftcData;
   treasury: TreasuryData;
@@ -914,18 +979,19 @@ export interface EnrichedData {
 
 /** Fetch all enriched data in parallel. Safe to call frequently — cached. */
 export async function fetchAllEnrichedData(): Promise<EnrichedData> {
-  const [fred, finnhub, fearGreed, coinGecko, tradingView, bls, cftc, treasury, defiLlama] = await Promise.all([
+  const [fred, finnhub, fearGreed, coinGecko, tradingView, tvLiveQuotes, bls, cftc, treasury, defiLlama] = await Promise.all([
     fetchFredData(),
     fetchFinnhubData(),
     fetchFearGreedIndex(),
     fetchCoinGeckoData(),
     fetchTradingViewSignals(),
+    fetchTVLiveQuotes(),
     fetchBlsData(),
     fetchCftcData(),
     fetchTreasuryData(),
     fetchDefiLlamaData(),
   ]);
-  return { fred, finnhub, fearGreed, coinGecko, tradingView, bls, cftc, treasury, defiLlama };
+  return { fred, finnhub, fearGreed, coinGecko, tradingView, tvLiveQuotes, bls, cftc, treasury, defiLlama };
 }
 
 /** Build a combined macro context block for AI prompts */
@@ -940,5 +1006,6 @@ export function enrichedDataToPromptBlock(data: EnrichedData): string {
     coinGeckoToPromptBlock(data.coinGecko),
     defiLlamaToPromptBlock(data.defiLlama),
     tradingViewToPromptBlock(data.tradingView),
+    tvQuotesToPromptBlock(data.tvLiveQuotes),
   ].join('\n\n');
 }

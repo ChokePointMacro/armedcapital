@@ -97,6 +97,69 @@ function useTVSignals(symbol: string): TVSignal[] {
   return signals;
 }
 
+/** Map Armed Capital symbols → TradingView WebSocket symbols */
+const TV_SYMBOL_MAP: Record<string, string> = {
+  'BTC': 'BITSTAMP:BTCUSD', 'BTC-USD': 'BITSTAMP:BTCUSD',
+  'ETH': 'BITSTAMP:ETHUSD', 'ETH-USD': 'BITSTAMP:ETHUSD',
+  'SOL': 'COINBASE:SOLUSD', 'SOL-USD': 'COINBASE:SOLUSD',
+  'SPX': 'SP:SPX', '^GSPC': 'SP:SPX',
+  'QQQ': 'NASDAQ:QQQ',
+  'DXY': 'TVC:DXY',
+  'US10Y': 'TVC:US10Y', '^TNX': 'TVC:US10Y',
+  'GOLD': 'TVC:GOLD', 'GC=F': 'TVC:GOLD',
+  'VIX': 'CBOE:VIX', '^VIX': 'CBOE:VIX',
+};
+
+interface TVWSQuote {
+  symbol: string;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  volume: number | null;
+  high: number | null;
+  low: number | null;
+}
+
+/** Hook: fetch live WebSocket quotes and auto-refresh */
+function useTVLiveQuotes(interval = 30_000): Map<string, TVWSQuote> {
+  const [quotes, setQuotes] = useState<Map<string, TVWSQuote>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const data = await safeFetch('/api/tradingview/quotes');
+      if (!cancelled && data?.quotes?.length) {
+        const map = new Map<string, TVWSQuote>();
+        for (const q of data.quotes) {
+          map.set(q.symbol, q);
+        }
+        setQuotes(map);
+      }
+    };
+    load();
+    const timer = setInterval(load, interval);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [interval]);
+
+  return quotes;
+}
+
+/** Merge a tile with live TV WebSocket data if available */
+function mergeTVQuote(tile: Tile, tvQuotes: Map<string, TVWSQuote>): Tile {
+  const tvSym = TV_SYMBOL_MAP[tile.symbol] || TV_SYMBOL_MAP[tile.symbol.replace(/-/g, '')];
+  if (!tvSym) return tile;
+  const q = tvQuotes.get(tvSym);
+  if (!q || q.price == null) return tile;
+  return {
+    ...tile,
+    price: q.price,
+    change: q.change ?? tile.change,
+    changePercent: q.changePercent ?? tile.changePercent,
+    volume: q.volume ?? tile.volume,
+    lastTimestamp: new Date().toISOString(),
+  };
+}
+
 const fp = (n: number | null, isIdx = false) => {
   if (n == null) return '—';
   const s = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1017,6 +1080,8 @@ export const Markets = ({ user }: { user: UserData | null }) => {
   const [error,        setError]        = useState<string | null>(null);
   const [countdown,    setCountdown]    = useState(REFRESH / 1000);
 
+  const tvQuotes = useTVLiveQuotes(REFRESH);
+
   const histMap  = Object.fromEntries(history.map(h => [h.symbol, h]));
   const optsMap  = Object.fromEntries(options.map(o => [o.symbol, o]));
 
@@ -1118,10 +1183,12 @@ export const Markets = ({ user }: { user: UserData | null }) => {
   useEffect(() => { const t = setInterval(() => setCountdown(c => Math.max(0, c - 1)), 1000); return () => clearInterval(t); }, [lastUp]);
   useEffect(() => { if (showAddBar) setTimeout(() => addInputRef.current?.focus(), 50); }, [showAddBar]);
 
-  const btc         = tiles.find(t => t.symbol === 'BTC');
-  const indices     = tiles.filter(t => t.isIndex);
-  const equities    = tiles.filter(t => !t.isCrypto && !t.isIndex);
-  const watchedTiles = tiles.filter(t => watchlist.includes(t.symbol));
+  // Merge TradingView WebSocket live prices into tiles (no-delay if Plus)
+  const liveTiles   = tiles.map(t => mergeTVQuote(t, tvQuotes));
+  const btc         = liveTiles.find(t => t.symbol === 'BTC');
+  const indices     = liveTiles.filter(t => t.isIndex);
+  const equities    = liveTiles.filter(t => !t.isCrypto && !t.isIndex);
+  const watchedTiles = liveTiles.filter(t => watchlist.includes(t.symbol));
 
   return (
     <div className="space-y-8">
@@ -1134,7 +1201,7 @@ export const Markets = ({ user }: { user: UserData | null }) => {
           <div>
             <h1 className="text-3xl font-serif italic text-white bitcoin-glow">Live Markets</h1>
             <p className="text-[10px] font-mono uppercase tracking-widest text-btc-orange/40 mt-1">
-              Prices via Public.com &middot; Candles &amp; Pivots via Yahoo Finance &middot; Options via Public.com
+              Prices via Public.com + TradingView WS &middot; Candles &amp; Pivots via Yahoo Finance &middot; Options via Public.com
             </p>
           </div>
           <div className="flex items-center gap-2">

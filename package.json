@@ -31,12 +31,14 @@
     "react-markdown": "^10.1.0",
     "resend": "^3.0.0",
     "tailwind-merge": "^3.5.0",
-    "twitter-api-v2": "^1.29.0"
+    "twitter-api-v2": "^1.29.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^7.0.11",
+    "@types/ws": "^8.5.0",
     "autoprefixer": "^10.4.21",
     "eslint": "^8.0.0",
     "eslint-config-next": "14.2.5",

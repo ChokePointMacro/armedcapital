@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
-import { fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, fetchFinnhubData, fetchBlsData, fetchCftcData, fetchTreasuryData, fetchDefiLlamaData } from '@/lib/enrichedData';
+import { fetchFredData, fetchFearGreedIndex, fetchCoinGeckoData, fetchFinnhubData, fetchBlsData, fetchCftcData, fetchTreasuryData, fetchDefiLlamaData, fetchTVLiveQuotes } from '@/lib/enrichedData';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -539,6 +539,33 @@ async function checkDefiLlama(): Promise<ServiceStatus> {
   }
 }
 
+async function checkTVLiveQuotes(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    const data = await fetchTVLiveQuotes();
+    const latency = Date.now() - start;
+    const quoteSummary = data.quotes.slice(0, 5).map(q => {
+      const price = q.price != null ? `$${q.price.toLocaleString()}` : 'N/A';
+      const chg = q.changePercent != null ? `${q.changePercent >= 0 ? '+' : ''}${q.changePercent.toFixed(2)}%` : '';
+      return `${q.symbol.split(':').pop()}: ${price} ${chg}`.trim();
+    }).join(' | ');
+    return {
+      name: 'TradingView WebSocket',
+      category: 'data',
+      connected: data.connected && data.available,
+      latencyMs: latency,
+      error: data.available ? null : !process.env.TV_SESSION_ID ? 'TV_SESSION_ID not set — add your TradingView sessionid cookie' : 'No quote data received',
+      limits: {
+        label: 'Real-Time Market Quotes',
+        tier: data.authenticated ? 'Plus (Authenticated)' : 'Free (10min delay)',
+        notes: data.available ? `${data.quotes.length} symbols streaming | ${quoteSummary}` : 'Configure TV_SESSION_ID env var for real-time data',
+      },
+    };
+  } catch (err) {
+    return { name: 'TradingView WebSocket', category: 'data', connected: false, latencyMs: Date.now() - start, error: err instanceof Error ? err.message : String(err), limits: null };
+  }
+}
+
 // ── Consumption data queries ─────────────────────────────────────────────────
 
 async function getConsumptionData() {
@@ -616,7 +643,7 @@ export async function GET() {
     await safeAuth();
 
     // Run live checks in parallel — original + new enrichment sources
-    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko, consumption, tvSignals, bls, cftc, treasury, defiLlama] = await Promise.all([
+    const [anthropic, openai, gemini, supabase, publicApi, fred, finnhub, fearGreed, coinGecko, consumption, tvSignals, tvLiveQuotes, bls, cftc, treasury, defiLlama] = await Promise.all([
       checkAnthropic(),
       checkOpenAI(),
       checkGemini(),
@@ -628,6 +655,7 @@ export async function GET() {
       checkCoinGecko(),
       getConsumptionData(),
       checkTradingView(),
+      checkTVLiveQuotes(),
       checkBLS(),
       checkCFTC(),
       checkTreasury(),
@@ -644,7 +672,7 @@ export async function GET() {
 
     const services: ServiceStatus[] = [
       anthropic, openai, gemini,
-      publicApi, yahoo, fred, finnhub, fearGreed, coinGecko, tvSignals,
+      publicApi, yahoo, fred, finnhub, fearGreed, coinGecko, tvSignals, tvLiveQuotes,
       bls, cftc, treasury, defiLlama,
       supabase, redis, pinecone, vercel, resend,
       twitter,
