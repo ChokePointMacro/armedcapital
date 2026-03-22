@@ -132,14 +132,12 @@ const ORG_HIERARCHY: OrgNode[] = [
   // Asset Management oversees portfolio
   { agentId: 'asset-management', children: ['market-scanner', 'data-enrichment'] },
   // HR oversees people/agents
-  { agentId: 'hr', children: ['quality-control', 'cx'] },
-  // IT oversees infra + engineering
-  { agentId: 'it', children: ['engineer', 'dev', 'api-key-manager'] },
+  { agentId: 'hr', children: ['end-user-deployment'] },
+  // IT oversees infra + engineering (includes API key management)
+  { agentId: 'it', children: ['engineer', 'dev'] },
   // Middle management
   { agentId: 'engineer', children: [] },
   { agentId: 'dev', children: [] },
-  // Operations (reports to COMMANDER directly)
-  // Marketing + Sales are peer to peer, both report up
 ];
 
 // Flat lookup for who reports to whom
@@ -153,25 +151,21 @@ const REPORTS_TO: Record<string, string> = {
   'market-scanner': 'asset-management',
   'data-enrichment': 'asset-management',
   'tradingview-relay': 'ares-hunter',
-  'quality-control': 'hr',
-  'cx': 'hr',
+  'end-user-deployment': 'hr',
   'engineer': 'it',
   'dev': 'it',
-  'api-key-manager': 'it',
   'bookkeeping': 'active-partner',
-  'marketing': 'active-partner',
-  'sales': 'active-partner',
-  'report-generator': 'active-partner',
-  'auto-scheduler': 'marketing',
-  'research-development': 'active-partner',
+  'revops': 'active-partner',
+  'intelligence': 'active-partner',
+  'auto-scheduler': 'revops',
 };
 
 // Tier assignments for org chart layout
 const TIER_MAP: Record<number, string[]> = {
   0: ['active-partner'],
-  1: ['ares-hunter', 'passive-partner', 'private-equity', 'asset-management', 'bookkeeping', 'report-generator', 'research-development'],
-  2: ['marketing', 'sales', 'hr', 'it'],
-  3: ['auto-scheduler', 'quality-control', 'cx', 'engineer', 'dev', 'api-key-manager'],
+  1: ['ares-hunter', 'passive-partner', 'private-equity', 'asset-management', 'bookkeeping', 'intelligence'],
+  2: ['revops', 'hr', 'it'],
+  3: ['auto-scheduler', 'end-user-deployment', 'engineer', 'dev'],
   4: ['market-scanner', 'data-enrichment', 'tradingview-relay'],
 };
 
@@ -416,7 +410,7 @@ export function OrgChart({ user }: { user: any }) {
   const agentMap = new Map(agents.map(a => [a.id, a]));
 
   // Filter to only employee agents (exclude the 5 infra agents for the org chart)
-  const INFRA_IDS = new Set(['api-key-manager', 'report-generator', 'auto-scheduler', 'market-scanner', 'data-enrichment']);
+  const INFRA_IDS = new Set(['intelligence', 'auto-scheduler', 'market-scanner', 'data-enrichment']);
 
   return (
     <div className="min-h-screen bg-black text-gray-200 p-4 md:p-6 max-w-7xl mx-auto">

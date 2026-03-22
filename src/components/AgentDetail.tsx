@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, RefreshCw, Loader2, CheckCircle2, XCircle, AlertTriangle,
-  Shield, Brain, Share2, BarChart3, Server, Target, DollarSign, Zap, Crosshair,
+  Brain, Share2, BarChart3, Server, Target, DollarSign, Zap, Crosshair,
   Plus, ChevronDown, ChevronRight, Send,
   Activity, TrendingUp, Eye, FileText, Cpu, Gauge,
 } from 'lucide-react';
@@ -72,7 +72,6 @@ interface Task {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  security: <Shield size={14} />,
   intelligence: <Brain size={14} />,
   social: <Share2 size={14} />,
   data: <BarChart3 size={14} />,
@@ -84,7 +83,6 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  security: 'text-red-400 border-red-400/30 bg-red-400/10',
   intelligence: 'text-btc-orange border-btc-orange/30 bg-btc-orange/10',
   social: 'text-sky-400 border-sky-400/30 bg-sky-400/10',
   data: 'text-green-400 border-green-400/30 bg-green-400/10',

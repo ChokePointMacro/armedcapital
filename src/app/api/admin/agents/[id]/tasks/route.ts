@@ -179,18 +179,19 @@ function generateDefaultTasks(agentId: string, type: 'queued' | 'completed'): Ta
   const dayAgo = new Date(Date.now() - 86400000).toISOString();
 
   const AGENT_TASKS: Record<string, { queued: Partial<TaskRow>[]; completed: Partial<TaskRow>[] }> = {
-    'api-key-manager': {
+    'it': {
       queued: [
         { title: 'Audit all API key expiration dates', description: 'Scan every configured key and flag those expiring within 30 days.', priority: 'high', estimated_cost: '$0.00' },
         { title: 'Validate FRED API key permissions', description: 'Test FRED endpoint access and confirm rate limits match expected tier.', priority: 'medium', estimated_cost: '$0.00' },
         { title: 'Check for orphaned credentials', description: 'Cross-reference env vars against active code imports to find unused keys.', priority: 'low', estimated_cost: '$0.00' },
+        { title: 'Run full infrastructure health sweep', description: 'Check Vercel, Supabase, all external APIs, DNS, and credential status.', priority: 'high', estimated_cost: '$0.00' },
       ],
       completed: [
         { title: 'Initial key inventory scan', description: 'Scanned 18 environment variables across 5 categories.', result_summary: 'Found 18 keys configured. 2 missing (SUPABASE_SERVICE_ROLE_KEY, TV_WEBHOOK_SECRET). 16 healthy.', completed_at: hourAgo },
         { title: 'Key format validation', description: 'Verified key format patterns match expected provider schemas.', result_summary: 'All present keys match expected format patterns. No format anomalies detected.', completed_at: dayAgo },
       ],
     },
-    'report-generator': {
+    'intelligence': {
       queued: [
         { title: 'Generate morning intelligence brief', description: 'Compile FRED, Finnhub, CoinGecko, and Fear & Greed data into a daily macro report.', priority: 'high', estimated_cost: '$0.08' },
         { title: 'Produce weekly portfolio risk summary', description: 'Aggregate 7-day market movements and generate risk assessment narrative.', priority: 'medium', estimated_cost: '$0.12' },
