@@ -74,6 +74,7 @@ const AVATAR_PALETTES: Record<string, { primary: string; secondary: string; acce
   SPECTRE:   { primary: '#22c55e', secondary: '#15803d', accent: '#86efac', bg: '#052e16' },
   MOSAIC:    { primary: '#eab308', secondary: '#a16207', accent: '#fde047', bg: '#422006' },
   HAWKEYE:   { primary: '#06b6d4', secondary: '#0e7490', accent: '#67e8f9', bg: '#083344' },
+  ARES:      { primary: '#dc2626', secondary: '#991b1b', accent: '#fca5a5', bg: '#1c0a0a' },
 };
 
 function AgentAvatar({ codename, size = 56 }: { codename: string; size?: number }) {
@@ -143,6 +144,7 @@ const ORG_HIERARCHY: OrgNode[] = [
 
 // Flat lookup for who reports to whom
 const REPORTS_TO: Record<string, string> = {
+  'ares-hunter': 'active-partner',
   'passive-partner': 'active-partner',
   'private-equity': 'active-partner',
   'asset-management': 'active-partner',
@@ -150,7 +152,7 @@ const REPORTS_TO: Record<string, string> = {
   'it': 'active-partner',
   'market-scanner': 'asset-management',
   'data-enrichment': 'asset-management',
-  'tradingview-relay': 'asset-management',
+  'tradingview-relay': 'ares-hunter',
   'quality-control': 'hr',
   'cx': 'hr',
   'engineer': 'it',
@@ -167,7 +169,7 @@ const REPORTS_TO: Record<string, string> = {
 // Tier assignments for org chart layout
 const TIER_MAP: Record<number, string[]> = {
   0: ['active-partner'],
-  1: ['passive-partner', 'private-equity', 'asset-management', 'bookkeeping', 'report-generator', 'research-development'],
+  1: ['ares-hunter', 'passive-partner', 'private-equity', 'asset-management', 'bookkeeping', 'report-generator', 'research-development'],
   2: ['marketing', 'sales', 'hr', 'it'],
   3: ['auto-scheduler', 'quality-control', 'cx', 'engineer', 'dev', 'api-key-manager'],
   4: ['market-scanner', 'data-enrichment', 'tradingview-relay'],
