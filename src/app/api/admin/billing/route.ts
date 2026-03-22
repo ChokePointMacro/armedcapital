@@ -33,16 +33,16 @@ export async function GET(req: NextRequest) {
   try {
     await safeAuth();
 
-    // Admin-only: check email
+    // Admin-only: strict email check — no fallthrough
     let adminEmail: string | null = null;
     try {
       const user = await currentUser();
       adminEmail = user?.emailAddresses?.[0]?.emailAddress || null;
-      if (!isAdmin(adminEmail)) {
-        return NextResponse.json({ error: 'Admin access required. Contact your administrator.' }, { status: 403 });
-      }
     } catch {
-      // In dev mode, allow access if auth is flaky
+      return NextResponse.json({ error: 'Authentication failed' }, { status: 401 });
+    }
+    if (!isAdmin(adminEmail)) {
+      return NextResponse.json({ error: 'Admin access required. Contact your administrator.' }, { status: 403 });
     }
 
     const supabase = createServerSupabase();

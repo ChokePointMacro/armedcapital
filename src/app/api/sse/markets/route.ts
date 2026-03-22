@@ -29,8 +29,17 @@ export async function GET(req: NextRequest) {
       const push = async () => {
         if (closed) return;
         try {
-          const { getQuotes, getConnectionStatus } = await import('@/lib/tradingviewWS');
-          const quotes = getQuotes(symbols);
+          const { getQuote, getConnectionStatus, subscribeQuotes } = await import('@/lib/tradingviewWS');
+
+          // Make sure we're subscribed
+          await subscribeQuotes(symbols).catch(() => {});
+
+          // Build quotes map from individual lookups
+          const quotes: Record<string, any> = {};
+          for (const sym of symbols) {
+            const q = getQuote(sym);
+            if (q) quotes[sym] = q;
+          }
           const status = getConnectionStatus();
 
           const payload = JSON.stringify({
