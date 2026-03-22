@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { RefreshCw, Loader2, Wifi, WifiOff, Zap, Clock, AlertTriangle, CheckCircle2, XCircle, Activity, ExternalLink, Star, DollarSign, TrendingUp, Database, Globe, Lock, Radio, Copy, Check, Send, Bell } from 'lucide-react';
+import { RefreshCw, Loader2, Wifi, WifiOff, Zap, Clock, AlertTriangle, CheckCircle2, XCircle, Activity, ExternalLink, Star, DollarSign, TrendingUp, Database, Globe, Lock, Radio, Copy, Check, Send, Bell, Key } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import { ApiKeyManager } from './ApiKeyManager';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -440,6 +441,9 @@ export function Usage({ user }: { user: any }) {
       {/* TradingView Webhook Setup */}
       {data && <WebhookWizard />}
 
+      {/* TradingView Live Session */}
+      {data && <TVSessionManager />}
+
       {/* Recommended Data Sources */}
       {data && <RecommendedSources />}
     </div>
@@ -633,6 +637,154 @@ function WebhookWizard() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── TradingView Live Session Manager ─────────────────────────────────────────
+
+function TVSessionManager() {
+  const [status, setStatus] = useState<any>(null);
+  const [sessionInput, setSessionInput] = useState('');
+  const [updating, setUpdating] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [showInput, setShowInput] = useState(false);
+
+  const checkStatus = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/tradingview/session');
+      if (res.ok) setStatus(await res.json());
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    checkStatus();
+    const iv = setInterval(checkStatus, 30_000);
+    return () => clearInterval(iv);
+  }, [checkStatus]);
+
+  const updateSession = useCallback(async () => {
+    if (!sessionInput.trim()) return;
+    setUpdating(true);
+    setResult(null);
+    try {
+      const res = await apiFetch('/api/tradingview/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sessionInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResult({ ok: true, msg: 'Session updated — real-time data reconnecting.' });
+        setSessionInput('');
+        setShowInput(false);
+        checkStatus();
+      } else {
+        setResult({ ok: false, msg: data.error || 'Failed to update session' });
+      }
+    } catch (err: any) {
+      setResult({ ok: false, msg: err.message || 'Network error' });
+    }
+    setUpdating(false);
+  }, [sessionInput, checkStatus]);
+
+  const needsReauth = status?.needsReauth;
+  const isConnected = status?.connected && status?.authenticated;
+
+  return (
+    <div className="mt-6 border-t border-gray-800 pt-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Activity size={14} className={isConnected ? 'text-green-400' : needsReauth ? 'text-red-400' : 'text-gray-500'} />
+        <h2 className="text-sm font-mono text-gray-200">TradingView Live Data</h2>
+        {isConnected && (
+          <span className="text-[9px] font-mono px-2 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/20">
+            CONNECTED — PLUS
+          </span>
+        )}
+        {needsReauth && (
+          <span className="text-[9px] font-mono px-2 py-0.5 rounded border bg-red-500/10 text-red-400 border-red-500/20 animate-pulse">
+            SESSION EXPIRED
+          </span>
+        )}
+        {!status?.hasSession && !needsReauth && (
+          <span className="text-[9px] font-mono px-2 py-0.5 rounded border bg-gray-500/10 text-gray-400 border-gray-500/20">
+            NOT CONFIGURED
+          </span>
+        )}
+      </div>
+
+      <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-4 space-y-3">
+        <p className="text-[10px] font-mono text-gray-500">
+          Real-time WebSocket price streaming via your TradingView Plus subscription.
+          {needsReauth ? ' Your session has expired — re-authenticate below.' : ''}
+        </p>
+
+        {/* Status row */}
+        {status && (
+          <div className="flex items-center gap-4 text-[9px] font-mono">
+            <span className={status.connected ? 'text-green-400' : 'text-red-400'}>
+              WS: {status.connected ? 'Connected' : 'Disconnected'}
+            </span>
+            <span className={status.authenticated ? 'text-green-400' : 'text-amber-400'}>
+              Auth: {status.authenticated ? 'Plus (no delay)' : 'Free (10min delay)'}
+            </span>
+            <span className="text-gray-600">
+              {status.cached} quotes cached
+            </span>
+          </div>
+        )}
+
+        {/* Re-auth button / input */}
+        {!showInput ? (
+          <button
+            onClick={() => setShowInput(true)}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 rounded border text-[11px] font-mono font-bold transition-colors',
+              needsReauth
+                ? 'border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 animate-pulse'
+                : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-btc-orange/40 hover:text-btc-orange'
+            )}
+          >
+            <Key size={12} />
+            {needsReauth ? 'Re-authenticate TradingView' : 'Update Session'}
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[9px] font-mono text-gray-500">
+              Go to tradingview.com → DevTools (F12) → Application → Cookies → copy the <span className="text-btc-orange">sessionid</span> value:
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={sessionInput}
+                onChange={e => setSessionInput(e.target.value)}
+                placeholder="Paste your TradingView sessionid cookie here..."
+                className="flex-1 px-3 py-2 bg-black border border-gray-700 rounded text-[11px] font-mono text-white placeholder:text-gray-700 focus:outline-none focus:border-btc-orange/50"
+              />
+              <button
+                onClick={updateSession}
+                disabled={updating || !sessionInput.trim()}
+                className="px-4 py-2 rounded border border-btc-orange/40 bg-btc-orange/10 text-btc-orange text-[11px] font-mono font-bold hover:bg-btc-orange/20 transition-colors disabled:opacity-40"
+              >
+                {updating ? <Loader2 size={12} className="animate-spin" /> : 'Connect'}
+              </button>
+              <button
+                onClick={() => { setShowInput(false); setSessionInput(''); setResult(null); }}
+                className="p-2 text-gray-600 hover:text-gray-400 transition-colors"
+              >
+                <XCircle size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {result && (
+          <div className={cn('flex items-center gap-2 text-[10px] font-mono', result.ok ? 'text-green-400' : 'text-red-400')}>
+            {result.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+            {result.msg}
           </div>
         )}
       </div>

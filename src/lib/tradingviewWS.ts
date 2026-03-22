@@ -74,6 +74,38 @@ function genSession(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).substring(2, 14)}`;
 }
 
+// ── Runtime Session Store ────────────────────────────────────────────────────
+// Allows updating TV_SESSION_ID at runtime without redeploying
+
+let runtimeSessionId: string | null = null;
+let sessionValid = true;
+let sessionLastChecked = 0;
+
+/** Get the active session ID (runtime override > env var) */
+export function getSessionId(): string | null {
+  return runtimeSessionId || process.env.TV_SESSION_ID || null;
+}
+
+/** Update session ID at runtime (e.g. from re-auth endpoint) */
+export function setSessionId(newId: string): void {
+  runtimeSessionId = newId;
+  sessionValid = true;
+  sessionLastChecked = Date.now();
+  // Force reconnect with new session
+  disconnect();
+}
+
+/** Mark current session as invalid (auth failure detected) */
+export function markSessionInvalid(): void {
+  sessionValid = false;
+  sessionLastChecked = Date.now();
+}
+
+/** Check if the current session is believed to be valid */
+export function isSessionValid(): boolean {
+  return sessionValid && !!getSessionId();
+}
+
 // ── Quote Cache ──────────────────────────────────────────────────────────────
 
 const quoteCache = new Map<string, TVQuote>();
@@ -143,7 +175,7 @@ function connectWebSocket(): Promise<void> {
       return;
     }
 
-    const sessionId = process.env.TV_SESSION_ID;
+    const sessionId = getSessionId();
     const headers: Record<string, string> = {
       'Origin': WS_ORIGIN,
     };
@@ -194,8 +226,17 @@ function connectWebSocket(): Promise<void> {
 
         try {
           const parsed = JSON.parse(msg);
+          // Detect auth failures
+          if (parsed.m === 'critical_error' || parsed.m === 'protocol_error') {
+            const errMsg = String(parsed.p?.[1] || parsed.p?.[0] || '');
+            if (errMsg.includes('auth') || errMsg.includes('session') || errMsg.includes('unauthorized')) {
+              console.warn('[TV WS] Auth failure detected — session may be expired');
+              markSessionInvalid();
+            }
+          }
           if (parsed.m === 'qsd') {
-            // Quote session data update
+            // Quote session data update — session is working
+            if (!sessionValid) { sessionValid = true; sessionLastChecked = Date.now(); }
             handleQuoteData(parsed.p?.[1]);
           }
         } catch {
@@ -296,16 +337,18 @@ export function disconnect(): void {
  * Check if authenticated (Plus/Premium session).
  */
 export function isAuthenticated(): boolean {
-  return !!process.env.TV_SESSION_ID;
+  return !!getSessionId() && sessionValid;
 }
 
 /**
  * Get connection status.
  */
-export function getConnectionStatus(): { connected: boolean; authenticated: boolean; symbols: number; cached: number } {
+export function getConnectionStatus(): { connected: boolean; authenticated: boolean; sessionValid: boolean; hasSession: boolean; symbols: number; cached: number } {
   return {
     connected: wsReady,
     authenticated: isAuthenticated(),
+    sessionValid,
+    hasSession: !!getSessionId(),
     symbols: subscribedSymbols.size,
     cached: quoteCache.size,
   };
