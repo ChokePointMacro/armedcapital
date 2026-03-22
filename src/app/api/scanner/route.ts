@@ -18,68 +18,86 @@ function setCache(key: string, data: any) {
   cache[key] = { data, ts: Date.now() };
 }
 
-// ── Public.com token ─────────────────────────────────────────────────────────
-
-let publicToken: { token: string; expires: number } | null = null;
-
-async function getPublicToken(): Promise<string> {
-  if (publicToken && Date.now() < publicToken.expires) return publicToken.token;
-
-  const secret = process.env.PUBLIC_SECRET_KEY;
-  if (!secret) throw new Error('PUBLIC_SECRET_KEY not set');
-
-  const res = await fetch('https://api.public.com/userapiauthservice/personal/access-tokens', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ validityInMinutes: 60, secret }),
-  });
-
-  if (!res.ok) throw new Error(`Public.com auth failed: ${res.status}`);
-  const data = await res.json();
-  const token = data.token || data.accessToken;
-  if (!token) throw new Error('No token in Public.com response');
-
-  publicToken = { token, expires: Date.now() + 55 * 60 * 1000 };
-  return token;
-}
-
 // ── Data fetchers ────────────────────────────────────────────────────────────
 
-const INSTRUMENTS = [
-  // Crypto
-  { symbol: 'BTC', name: 'Bitcoin', type: 'CRYPTO', yahooSymbol: 'BTC-USD' },
-  { symbol: 'ETH', name: 'Ethereum', type: 'CRYPTO', yahooSymbol: 'ETH-USD' },
-  // Indices
-  { symbol: 'SPX', name: 'S&P 500', type: 'INDEX', yahooSymbol: '^GSPC' },
-  { symbol: 'NDX', name: 'Nasdaq 100', type: 'INDEX', yahooSymbol: '^NDX' },
-  // Equities
-  { symbol: 'NVDA', name: 'NVIDIA', type: 'EQUITY', yahooSymbol: 'NVDA' },
-  { symbol: 'TSLA', name: 'Tesla', type: 'EQUITY', yahooSymbol: 'TSLA' },
-  { symbol: 'AAPL', name: 'Apple', type: 'EQUITY', yahooSymbol: 'AAPL' },
-  { symbol: 'MSFT', name: 'Microsoft', type: 'EQUITY', yahooSymbol: 'MSFT' },
-  { symbol: 'META', name: 'Meta', type: 'EQUITY', yahooSymbol: 'META' },
-  { symbol: 'AMZN', name: 'Amazon', type: 'EQUITY', yahooSymbol: 'AMZN' },
-  { symbol: 'AMD', name: 'AMD', type: 'EQUITY', yahooSymbol: 'AMD' },
-  { symbol: 'MSTR', name: 'MicroStrategy', type: 'EQUITY', yahooSymbol: 'MSTR' },
-  // Commodities / Macro
-  { symbol: 'GC=F', name: 'Gold', type: 'COMMODITY', yahooSymbol: 'GC=F' },
-  { symbol: 'CL=F', name: 'Crude Oil', type: 'COMMODITY', yahooSymbol: 'CL=F' },
+// Extra instruments not covered by Public.com — fetched via Yahoo v8 chart API
+const EXTRA_INSTRUMENTS = [
+  { symbol: 'GC=F', name: 'Gold', type: 'COMMODITY', yahooSymbol: 'GC%3DF' },
+  { symbol: 'CL=F', name: 'Crude Oil', type: 'COMMODITY', yahooSymbol: 'CL%3DF' },
   { symbol: 'DX-Y.NYB', name: 'US Dollar Index', type: 'MACRO', yahooSymbol: 'DX-Y.NYB' },
-  { symbol: '^TNX', name: '10Y Treasury Yield', type: 'MACRO', yahooSymbol: '^TNX' },
-  { symbol: '^VIX', name: 'VIX', type: 'MACRO', yahooSymbol: '^VIX' },
+  { symbol: '^TNX', name: '10Y Treasury Yield', type: 'MACRO', yahooSymbol: '%5ETNX' },
+  { symbol: '^VIX', name: 'VIX', type: 'MACRO', yahooSymbol: '%5EVIX' },
 ];
 
-async function fetchYahooQuotes(): Promise<any[]> {
-  const symbols = INSTRUMENTS.map(i => i.yahooSymbol).join(',');
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}`;
+// Fetch live quotes from our own /api/markets (Public.com data)
+async function fetchMarketQuotes(): Promise<any[]> {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000';
 
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  });
+    const res = await fetch(`${baseUrl}/api/markets`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
 
-  if (!res.ok) throw new Error(`Yahoo Finance error: ${res.status}`);
-  const json = await res.json();
-  return json.quoteResponse?.result || [];
+// Fetch extra macro/commodity data via Yahoo v8 chart (which still works, unlike v7 quote)
+async function fetchYahooChartQuote(yahooSymbol: string): Promise<any | null> {
+  try {
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const result = json.chart?.result?.[0];
+    if (!result) return null;
+
+    const meta = result.meta;
+    const quotes = result.indicators?.quote?.[0];
+    const timestamps = result.timestamp || [];
+    const closes = quotes?.close || [];
+
+    // Get latest close and previous close for change calc
+    const validCloses = closes.filter((c: any) => c != null);
+    const price = meta.regularMarketPrice || validCloses[validCloses.length - 1];
+    const prevClose = meta.chartPreviousClose || validCloses[validCloses.length - 2] || price;
+    const change = price - prevClose;
+    const changePct = prevClose ? (change / prevClose) * 100 : 0;
+
+    // Calculate 5d high/low from candle data
+    const highs = (quotes?.high || []).filter((h: any) => h != null);
+    const lows = (quotes?.low || []).filter((l: any) => l != null);
+
+    return {
+      price,
+      change: +change.toFixed(2),
+      changePct: +changePct.toFixed(2),
+      dayHigh: highs.length ? Math.max(...highs.slice(-1)) : null,
+      dayLow: lows.length ? Math.min(...lows.slice(-1)) : null,
+      fiveDayHigh: highs.length ? Math.max(...highs) : null,
+      fiveDayLow: lows.length ? Math.min(...lows) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchExtraInstruments(): Promise<any[]> {
+  const results = await Promise.all(
+    EXTRA_INSTRUMENTS.map(async (inst) => {
+      const data = await fetchYahooChartQuote(inst.yahooSymbol);
+      if (!data) return null;
+      return {
+        symbol: inst.symbol,
+        name: inst.name,
+        type: inst.type,
+        ...data,
+      };
+    })
+  );
+  return results.filter(Boolean);
 }
 
 async function fetchTerminalData(): Promise<any> {
@@ -147,34 +165,42 @@ interface ScanResult {
 }
 
 async function runAIScan(
-  quotes: any[],
+  marketQuotes: any[],
+  extraQuotes: any[],
   terminal: any | null,
   options: any[],
 ): Promise<ScanResult> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  // Build market snapshot for Claude
-  const marketSnapshot = quotes.map(q => {
-    const inst = INSTRUMENTS.find(i => i.yahooSymbol === q.symbol);
-    return {
-      symbol: inst?.symbol || q.symbol,
-      name: inst?.name || q.shortName || q.symbol,
-      type: inst?.type || 'UNKNOWN',
-      price: q.regularMarketPrice,
-      change: q.regularMarketChange,
-      changePct: q.regularMarketChangePercent,
-      prevClose: q.regularMarketPreviousClose,
-      dayHigh: q.regularMarketDayHigh,
-      dayLow: q.regularMarketDayLow,
-      fiftyDayAvg: q.fiftyDayAverage,
-      twoHundredDayAvg: q.twoHundredDayAverage,
-      fiftyTwoWeekHigh: q.fiftyTwoWeekHigh,
-      fiftyTwoWeekLow: q.fiftyTwoWeekLow,
-      volume: q.regularMarketVolume,
-      avgVolume: q.averageDailyVolume3Month,
-      marketCap: q.marketCap,
-    };
-  });
+  // Build market snapshot from Public.com data
+  const marketSnapshot = [
+    ...marketQuotes.map((q: any) => ({
+      symbol: q.symbol,
+      name: q.name,
+      type: q.type || (q.isCrypto ? 'CRYPTO' : q.isIndex ? 'INDEX' : 'EQUITY'),
+      price: q.price,
+      change: q.change,
+      changePct: q.changePercent,
+      volume: q.volume,
+      bid: q.bid,
+      ask: q.ask,
+      spread: q.spread,
+    })),
+    ...extraQuotes.map((q: any) => ({
+      symbol: q.symbol,
+      name: q.name,
+      type: q.type,
+      price: q.price,
+      change: q.change,
+      changePct: q.changePct,
+      dayHigh: q.dayHigh,
+      dayLow: q.dayLow,
+      fiveDayHigh: q.fiveDayHigh,
+      fiveDayLow: q.fiveDayLow,
+    })),
+  ];
+
+  const totalInstruments = marketSnapshot.length;
 
   // Options summary
   const optionsSummary = options.map(o => {
@@ -301,7 +327,7 @@ RULES:
     scanMode: 'full-spectrum',
     scannedAt: now.toISOString(),
     nextScanAt: nextScan.toISOString(),
-    instrumentsScanned: INSTRUMENTS.length,
+    instrumentsScanned: totalInstruments,
   };
 }
 
@@ -318,16 +344,17 @@ export async function GET() {
     console.log('[Scanner] Starting full-spectrum scan...');
 
     // Fetch all data in parallel
-    const [quotes, terminal, options] = await Promise.all([
-      fetchYahooQuotes(),
+    const [marketQuotes, extraQuotes, terminal, options] = await Promise.all([
+      fetchMarketQuotes(),
+      fetchExtraInstruments(),
       fetchTerminalData(),
       fetchOptionsFlow(),
     ]);
 
-    console.log(`[Scanner] Data: ${quotes.length} quotes, terminal=${!!terminal}, ${options.length} option chains`);
+    console.log(`[Scanner] Data: ${marketQuotes.length} market quotes, ${extraQuotes.length} extra, terminal=${!!terminal}, ${options.length} option chains`);
 
     // Run AI scan
-    const result = await runAIScan(quotes, terminal, options);
+    const result = await runAIScan(marketQuotes, extraQuotes, terminal, options);
 
     console.log(`[Scanner] Found ${result.opportunities.length} opportunities`);
 
