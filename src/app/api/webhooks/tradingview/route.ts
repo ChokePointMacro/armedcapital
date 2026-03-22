@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  pushSignal, getRecentSignals, getSignalsForTicker, getBufferSize,
+  type TradingViewSignal, type BufferedSignal,
+} from '@/lib/tradingviewSignals';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,82 +36,6 @@ export const dynamic = 'force-dynamic';
  * }
  */
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-export interface TradingViewSignal {
-  // Core fields (from TV placeholders)
-  ticker?: string;
-  exchange?: string;
-  close?: number;
-  open?: number;
-  high?: number;
-  low?: number;
-  volume?: number;
-  time?: string;
-  interval?: string;
-  // Custom fields
-  action?: string;      // 'buy' | 'sell' | 'alert' | 'long' | 'short' | 'close'
-  strategy?: string;    // strategy name or indicator
-  message?: string;     // free-form signal description
-  secret?: string;      // webhook auth secret
-  // Strategy-specific
-  price?: number;       // entry/exit price
-  contracts?: number;   // position size
-  position_size?: number;
-  order_id?: string;
-  // Extra indicator data (plot values)
-  plot_0?: number;
-  plot_1?: number;
-  plot_2?: number;
-  plot_3?: number;
-  plot_4?: number;
-}
-
-export interface StoredSignal extends TradingViewSignal {
-  id?: number;
-  received_at: string;
-  processed: boolean;
-}
-
-// ── In-Memory Signal Buffer ─────────────────────────────────────────────────
-// Signals are stored in memory AND persisted to Supabase.
-// The in-memory buffer gives other routes instant access without DB queries.
-
-const SIGNAL_BUFFER_SIZE = 200;
-const SIGNAL_BUFFER_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
-interface BufferedSignal extends TradingViewSignal {
-  received_at: string;
-}
-
-let signalBuffer: BufferedSignal[] = [];
-
-/** Get recent signals from the in-memory buffer */
-export function getRecentSignals(limit = 50): BufferedSignal[] {
-  const cutoff = Date.now() - SIGNAL_BUFFER_TTL;
-  return signalBuffer
-    .filter(s => new Date(s.received_at).getTime() > cutoff)
-    .slice(-limit);
-}
-
-/** Get signals for a specific ticker */
-export function getSignalsForTicker(ticker: string, limit = 10): BufferedSignal[] {
-  return signalBuffer
-    .filter(s => s.ticker?.toUpperCase() === ticker.toUpperCase())
-    .slice(-limit);
-}
-
-/** Get latest signal per unique ticker */
-export function getLatestSignalPerTicker(): Map<string, BufferedSignal> {
-  const map = new Map<string, BufferedSignal>();
-  for (const sig of signalBuffer) {
-    if (sig.ticker) {
-      map.set(sig.ticker.toUpperCase(), sig);
-    }
-  }
-  return map;
-}
-
 // ── Persistence to Supabase ─────────────────────────────────────────────────
 
 async function persistSignal(signal: TradingViewSignal): Promise<void> {
@@ -127,11 +55,10 @@ async function persistSignal(signal: TradingViewSignal): Promise<void> {
       price_high: signal.high || null,
       price_low: signal.low || null,
       volume: signal.volume || null,
-      payload: signal, // store full raw payload as JSONB
+      payload: signal,
       received_at: new Date().toISOString(),
     });
   } catch (err) {
-    // Don't fail the webhook response if DB write fails
     console.error('[TV Webhook] Failed to persist signal:', err);
   }
 }
@@ -140,7 +67,6 @@ async function persistSignal(signal: TradingViewSignal): Promise<void> {
 
 function validateWebhookSecret(signal: TradingViewSignal): boolean {
   const expectedSecret = process.env.TV_WEBHOOK_SECRET;
-  // If no secret is configured, accept all webhooks (open mode)
   if (!expectedSecret) return true;
   return signal.secret === expectedSecret;
 }
@@ -155,41 +81,31 @@ export async function POST(request: NextRequest) {
     if (contentType.includes('application/json')) {
       signal = await request.json();
     } else {
-      // TradingView sends text/plain if the message isn't valid JSON
       const text = await request.text();
       try {
         signal = JSON.parse(text);
       } catch {
-        // Treat as a simple text alert
         signal = { message: text, action: 'alert' };
       }
     }
 
-    // Validate webhook secret
     if (!validateWebhookSecret(signal)) {
       console.warn('[TV Webhook] Invalid secret received');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Remove secret from stored payload
     const { secret, ...cleanSignal } = signal;
 
-    // Normalize action
     if (cleanSignal.action) {
       cleanSignal.action = cleanSignal.action.toLowerCase().trim();
     }
 
-    // Add to in-memory buffer
     const buffered: BufferedSignal = {
       ...cleanSignal,
       received_at: new Date().toISOString(),
     };
-    signalBuffer.push(buffered);
-    if (signalBuffer.length > SIGNAL_BUFFER_SIZE) {
-      signalBuffer = signalBuffer.slice(-SIGNAL_BUFFER_SIZE);
-    }
+    pushSignal(buffered);
 
-    // Persist to Supabase (async, don't block response)
     persistSignal(cleanSignal);
 
     console.log(`[TV Webhook] Signal received: ${cleanSignal.ticker || 'unknown'} ${cleanSignal.action || 'alert'} @ ${cleanSignal.close || 'N/A'}`);
@@ -213,17 +129,15 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Optional: require auth for reading signals
     const { safeAuth } = await import('@/lib/authHelper');
     await safeAuth();
 
     const url = new URL(request.url);
     const ticker = url.searchParams.get('ticker');
     const limit = parseInt(url.searchParams.get('limit') || '50', 10);
-    const source = url.searchParams.get('source') || 'buffer'; // 'buffer' or 'db'
+    const source = url.searchParams.get('source') || 'buffer';
 
     if (source === 'db') {
-      // Read from Supabase for historical signals
       const { createServerSupabase } = await import('@/lib/supabase');
       const db = createServerSupabase();
       let query = db.from('tradingview_signals')
@@ -246,7 +160,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Default: read from in-memory buffer (fastest)
     let signals: BufferedSignal[];
     if (ticker) {
       signals = getSignalsForTicker(ticker, limit);
@@ -257,7 +170,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       signals,
       count: signals.length,
-      bufferSize: signalBuffer.length,
+      bufferSize: getBufferSize(),
       source: 'buffer',
       checkedAt: new Date().toISOString(),
     });

@@ -469,8 +469,8 @@ export async function fetchTradingViewSignals(): Promise<TradingViewSignalData> 
   if (tvCache && Date.now() - tvCache.ts < TV_CACHE_TTL) return tvCache.data;
 
   try {
-    // Try in-memory buffer first (imported at runtime to avoid circular deps)
-    const { getRecentSignals } = await import('@/app/api/webhooks/tradingview/route');
+    // Try in-memory buffer first
+    const { getRecentSignals } = await import('@/lib/tradingviewSignals');
     const buffered = getRecentSignals(50);
 
     if (buffered.length > 0) {
