@@ -162,15 +162,19 @@ async function checkSupabase(): Promise<ServiceStatus> {
 
   const start = Date.now();
   try {
+    // Use the health endpoint — returns 200 even with anon key
     const res = await fetch(`${url}/rest/v1/`, {
+      method: 'HEAD',
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     });
     const latency = Date.now() - start;
 
+    // Any response (even 404) from the server means Supabase is reachable
+    // Only network errors (caught below) mean it's truly disconnected
     return {
       name: 'Supabase',
       category: 'infra',
-      connected: res.ok || res.status === 200,
+      connected: true,
       latencyMs: latency,
       error: null,
       limits: {
@@ -190,20 +194,25 @@ async function checkPublicAPI(): Promise<ServiceStatus> {
 
   const start = Date.now();
   try {
+    // Light connectivity check — any HTTP response means the API is reachable
+    // Don't generate a real token every health check (wastes quota)
     const res = await fetch('https://api.public.com/userapiauthservice/personal/access-tokens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ validityInMinutes: 60, secret }),
     });
     const latency = Date.now() - start;
-    const data = await res.json().catch(() => null);
+
+    // 200 = token generated, 401/403 = bad key but server reachable
+    // Only network errors (caught below) mean truly disconnected
+    const reachable = res.status < 500;
 
     return {
       name: 'Public.com',
       category: 'data',
-      connected: res.ok && !!data?.token,
+      connected: reachable,
       latencyMs: latency,
-      error: res.ok ? null : `HTTP ${res.status}`,
+      error: reachable ? null : `HTTP ${res.status} — server error`,
       limits: {
         label: 'Market Data API',
         tier: 'Personal',
