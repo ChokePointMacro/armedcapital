@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { to: '/reports', label: 'Reports' },
   { to: '/automated', label: 'Automated' },
   { to: '/terminal', label: 'Terminal' },
+  { to: '/scanner', label: 'Scanner' },
   { to: '/trade-flow', label: 'Trade Flow' },
   { to: '/usage', label: 'Usage' },
 ];
