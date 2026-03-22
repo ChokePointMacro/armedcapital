@@ -20,6 +20,7 @@ export interface TradingViewSignal {
   action?: string;
   strategy?: string;
   message?: string;
+  secret?: string;      // webhook auth secret (stripped before storage)
   price?: number;
   contracts?: number;
   position_size?: number;
