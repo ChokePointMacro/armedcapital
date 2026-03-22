@@ -1041,6 +1041,9 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           completed_at: null,
           estimated_cost: null,
           actual_cost: null,
+          prompt: null,
+          run_endpoint: null,
+          result_content: null,
         }, ...prev]);
       }
     } catch { /* ignore */ }
