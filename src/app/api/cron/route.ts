@@ -84,8 +84,8 @@ export async function GET(request: NextRequest) {
             accessSecret: accSecret,
           });
 
-          const tweet = await client.v1.tweet(content.substring(0, 280));
-          console.log(`[Cron] ✓ Posted tweet ${tweet.id_str} for scheduled post ${post.id}`);
+          const tweet = await client.v2.tweet(content.substring(0, 280));
+          console.log(`[Cron] ✓ Posted tweet ${tweet.data.id} for scheduled post ${post.id}`);
 
           await updateScheduledPostStatus(post.id, 'posted');
           results.postsProcessed++;

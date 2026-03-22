@@ -122,8 +122,8 @@ export async function POST(request: NextRequest) {
           accessSecret: accSecret,
         });
 
-        const result = await client.v1.tweet(text.substring(0, 280));
-        results.x = { success: true, id: result.id_str };
+        const result = await client.v2.tweet(text.substring(0, 280));
+        results.x = { success: true, id: result.data.id };
       } catch (err) {
         results.x = { success: false, error: err instanceof Error ? err.message : String(err) };
       }

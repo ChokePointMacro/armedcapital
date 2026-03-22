@@ -84,16 +84,37 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const refreshed = await refreshXToken(tokenRecord);
+      let client: TwitterApi;
 
-      if (!refreshed || !refreshed.accessToken) {
-        return NextResponse.json(
-          { error: 'Failed to authenticate - token is invalid' },
-          { status: 401 }
-        );
+      // Check if using OAuth 1.0a env-var credentials
+      if (tokenRecord.access_token === 'oauth1a-env') {
+        const apiKey = process.env.X_API_KEY;
+        const apiSecret = process.env.X_API_SECRET;
+        const accToken = process.env.X_ACCESS_TOKEN;
+        const accSecret = process.env.X_ACCESS_SECRET;
+        if (!apiKey || !apiSecret || !accToken || !accSecret) {
+          return NextResponse.json(
+            { error: 'X OAuth 1.0a credentials not configured in environment' },
+            { status: 500 }
+          );
+        }
+        client = new TwitterApi({
+          appKey: apiKey,
+          appSecret: apiSecret,
+          accessToken: accToken,
+          accessSecret: accSecret,
+        });
+      } else {
+        const refreshed = await refreshXToken(tokenRecord);
+        if (!refreshed || !refreshed.accessToken) {
+          return NextResponse.json(
+            { error: 'Failed to authenticate - token is invalid' },
+            { status: 401 }
+          );
+        }
+        client = new TwitterApi(refreshed.accessToken);
       }
 
-      const client = new TwitterApi(refreshed.accessToken);
       const result = await client.v2.tweet(text);
 
       return NextResponse.json({

@@ -94,6 +94,14 @@ export const Profile = ({ user, onLogout }: { user: UserData | null; onLogout: (
         if (key in PLATFORM_CONFIG) setCredModal(key);
         return;
       }
+      // Direct connection (OAuth 1.0a via env vars — no popup needed)
+      if (data.connected) {
+        const platformKey = platform === 'x/connect' ? 'x' : platform.split('/')[0];
+        if (data.handle) setSocialAccounts(prev => [...prev.filter(a => a.platform !== platformKey), { platform: platformKey, handle: data.handle }]);
+        apiFetch('/api/social/accounts').then(r => r.json()).then(d => setSocialAccounts(d.accounts || []));
+        setConnectingPlatform(null);
+        return;
+      }
       if (!data.url) { alert(data.error || `Failed to get ${platform} auth URL`); setConnectingPlatform(null); return; }
       const popup = window.open(data.url, `${platform}_auth`, 'width=600,height=700');
       const handler = (e: MessageEvent) => {

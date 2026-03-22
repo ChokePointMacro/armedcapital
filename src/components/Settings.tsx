@@ -130,6 +130,18 @@ export const Settings = ({ user, onLogout }: { user: UserData | null; onLogout: 
 
   const connectOAuth = (platform: string, event: string) => {
     apiFetch(`/api/auth/${platform}/url`).then(r => r.json()).then(data => {
+      // Direct connection (OAuth 1.0a via env vars — no popup needed)
+      if (data.connected) {
+        const platformKey = platform === 'x/connect' ? 'x' : platform.split('/')[0];
+        if (data.handle) {
+          setSocialAccounts(prev => [
+            ...prev.filter(a => a.platform !== platformKey),
+            { platform: platformKey, handle: data.handle }
+          ]);
+        }
+        apiFetch('/api/social/accounts').then(r => r.json()).then(d => setSocialAccounts(d.accounts || []));
+        return;
+      }
       if (data.url) {
         const popup = window.open(data.url, `${platform}_auth`, 'width=600,height=700');
         const handler = (e: MessageEvent) => {
