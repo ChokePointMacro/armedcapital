@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Loader2, Wifi, WifiOff, Zap, Clock, AlertTriangle, CheckCircle2, XCircle, Activity, ExternalLink, Star, DollarSign, TrendingUp, Database, Globe, Lock, Radio } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { RefreshCw, Loader2, Wifi, WifiOff, Zap, Clock, AlertTriangle, CheckCircle2, XCircle, Activity, ExternalLink, Star, DollarSign, TrendingUp, Database, Globe, Lock, Radio, Copy, Check, Send, Bell } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { ApiKeyManager } from './ApiKeyManager';
 
@@ -437,8 +437,205 @@ export function Usage({ user }: { user: any }) {
         </div>
       )}
 
+      {/* TradingView Webhook Setup */}
+      {data && <WebhookWizard />}
+
       {/* Recommended Data Sources */}
       {data && <RecommendedSources />}
+    </div>
+  );
+}
+
+// ── TradingView Webhook Setup Wizard ─────────────────────────────────────────
+
+const WEBHOOK_URL = 'https://armedcapital.vercel.app/api/webhooks/tradingview';
+
+function WebhookWizard() {
+  const [copied, setCopied] = useState<string | null>(null);
+  const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [signals, setSignals] = useState<any[]>([]);
+  const [loadingSignals, setLoadingSignals] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const PAYLOAD_TEMPLATE = `{"secret":"04a64a2412a07a673c3ceecf239d57769ec8f96a1222e752c83a6995e0723982","ticker":"{{ticker}}","exchange":"{{exchange}}","interval":"{{interval}}","price":{{close}},"volume":{{volume}},"action":"buy","time":"{{time}}"}`;
+
+  const copyToClipboard = useCallback(async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    } catch { /* fallback */ }
+  }, []);
+
+  const sendTestSignal = useCallback(async () => {
+    setTestStatus('sending');
+    setTestResult(null);
+    try {
+      const res = await apiFetch('/api/webhooks/tradingview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: '04a64a2412a07a673c3ceecf239d57769ec8f96a1222e752c83a6995e0723982',
+          ticker: 'BTCUSD',
+          exchange: 'BITSTAMP',
+          interval: '1D',
+          price: 68000 + Math.round(Math.random() * 2000),
+          volume: Math.round(Math.random() * 50000),
+          action: Math.random() > 0.5 ? 'buy' : 'sell',
+          time: new Date().toISOString(),
+          strategy: 'test-signal',
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTestStatus('success');
+        setTestResult(`Signal received: ${data.ticker} ${data.action} @ ${data.timestamp}`);
+        fetchSignals();
+      } else {
+        setTestStatus('error');
+        setTestResult(`Error ${res.status}: ${res.statusText}`);
+      }
+    } catch (err: any) {
+      setTestStatus('error');
+      setTestResult(err.message || 'Network error');
+    }
+  }, []);
+
+  const fetchSignals = useCallback(async () => {
+    setLoadingSignals(true);
+    try {
+      const res = await apiFetch('/api/webhooks/tradingview?limit=10');
+      if (res.ok) {
+        const data = await res.json();
+        setSignals(data.signals || []);
+      }
+    } catch { /* ignore */ }
+    setLoadingSignals(false);
+  }, []);
+
+  useEffect(() => {
+    fetchSignals();
+    pollRef.current = setInterval(fetchSignals, 15000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [fetchSignals]);
+
+  return (
+    <div className="mt-6 border-t border-gray-800 pt-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Bell size={14} className="text-btc-orange" />
+        <h2 className="text-sm font-mono text-gray-200">TradingView Webhook Setup</h2>
+      </div>
+
+      {/* Step-by-step setup */}
+      <div className="space-y-3 mb-5">
+        <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-4">
+          <p className="text-[11px] font-mono text-btc-orange font-bold mb-2">STEP 1 — Webhook URL</p>
+          <p className="text-[10px] font-mono text-gray-500 mb-2">In TradingView: Create Alert → Notifications → check &quot;Webhook URL&quot; → paste this:</p>
+          <div className="flex items-center gap-2 bg-black/60 border border-gray-700 rounded px-3 py-2">
+            <code className="text-[10px] font-mono text-green-400 flex-1 select-all break-all">{WEBHOOK_URL}</code>
+            <button
+              onClick={() => copyToClipboard(WEBHOOK_URL, 'url')}
+              className="shrink-0 p-1.5 rounded border border-gray-700 hover:border-btc-orange/50 transition-colors"
+              title="Copy URL"
+            >
+              {copied === 'url' ? <Check size={12} className="text-green-400" /> : <Copy size={12} className="text-gray-500" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-4">
+          <p className="text-[11px] font-mono text-btc-orange font-bold mb-2">STEP 2 — Message Payload</p>
+          <p className="text-[10px] font-mono text-gray-500 mb-2">Go back to the main alert screen → paste this into the &quot;Message&quot; field (replace all existing text):</p>
+          <div className="flex items-start gap-2 bg-black/60 border border-gray-700 rounded px-3 py-2">
+            <code className="text-[9px] font-mono text-cyan-400 flex-1 select-all break-all leading-relaxed">{PAYLOAD_TEMPLATE}</code>
+            <button
+              onClick={() => copyToClipboard(PAYLOAD_TEMPLATE, 'payload')}
+              className="shrink-0 p-1.5 rounded border border-gray-700 hover:border-btc-orange/50 transition-colors mt-0.5"
+              title="Copy payload"
+            >
+              {copied === 'payload' ? <Check size={12} className="text-green-400" /> : <Copy size={12} className="text-gray-500" />}
+            </button>
+          </div>
+          <p className="text-[9px] font-mono text-gray-600 mt-2">
+            Change <span className="text-amber-400">&quot;buy&quot;</span> to <span className="text-amber-400">&quot;sell&quot;</span> or <span className="text-amber-400">&quot;alert&quot;</span> depending on signal type.
+            The {`{{ticker}}`}, {`{{close}}`}, etc. are TradingView placeholders — they auto-fill for any asset.
+          </p>
+        </div>
+
+        <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-4">
+          <p className="text-[11px] font-mono text-btc-orange font-bold mb-2">STEP 3 — Test It</p>
+          <p className="text-[10px] font-mono text-gray-500 mb-2">Send a test signal to verify the webhook endpoint is working:</p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={sendTestSignal}
+              disabled={testStatus === 'sending'}
+              className="flex items-center gap-2 px-4 py-2 rounded border border-btc-orange/40 bg-btc-orange/10 text-btc-orange text-[11px] font-mono font-bold hover:bg-btc-orange/20 transition-colors disabled:opacity-50"
+            >
+              {testStatus === 'sending' ? (
+                <><Loader2 size={12} className="animate-spin" /> Sending...</>
+              ) : (
+                <><Send size={12} /> Send Test Signal</>
+              )}
+            </button>
+            {testStatus === 'success' && (
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-green-400">
+                <CheckCircle2 size={12} /> {testResult}
+              </div>
+            )}
+            {testStatus === 'error' && (
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-red-400">
+                <XCircle size={12} /> {testResult}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Recent signals feed */}
+      <div className="bg-gray-900/60 border border-gray-800 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Activity size={12} className="text-btc-orange animate-pulse" />
+            <span className="text-[11px] font-mono text-gray-300 font-bold">Recent Signals</span>
+            <span className="text-[9px] font-mono text-gray-600">({signals.length})</span>
+          </div>
+          <button onClick={fetchSignals} className="p-1 text-gray-600 hover:text-btc-orange transition-colors" title="Refresh">
+            <RefreshCw size={11} className={loadingSignals ? 'animate-spin' : ''} />
+          </button>
+        </div>
+        {signals.length === 0 ? (
+          <p className="text-[10px] font-mono text-gray-600 text-center py-4">
+            No signals yet. Send a test signal above or trigger a TradingView alert.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {signals.map((sig: any, i: number) => (
+              <div key={i} className="flex items-center justify-between px-2.5 py-1.5 bg-black/40 rounded border border-gray-800/50">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                    sig.action === 'buy' ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                    : sig.action === 'sell' ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                    : 'bg-btc-orange/10 text-btc-orange border border-btc-orange/20'
+                  }`}>
+                    {(sig.action || 'ALERT').toUpperCase()}
+                  </span>
+                  <span className="text-[10px] font-mono text-white font-bold">{sig.ticker || '—'}</span>
+                  <span className="text-[9px] font-mono text-gray-500">{sig.exchange || ''}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-mono text-gray-300">
+                    {sig.price_close || sig.price || sig.close ? `$${Number(sig.price_close || sig.price || sig.close).toLocaleString()}` : '—'}
+                  </span>
+                  <span className="text-[8px] font-mono text-gray-600">
+                    {sig.received_at ? new Date(sig.received_at).toLocaleTimeString() : ''}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
