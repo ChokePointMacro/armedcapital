@@ -72,8 +72,8 @@ export const Layout = ({ children, user, onLogout, onLogin }: {
             page: pathname,
             screenRes: typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : null,
             userId: user?.id || null,
-            userName: user?.name || null,
-            userEmail: user?.email || null,
+            userName: user?.displayName || user?.username || null,
+            userEmail: user?.username || null,
           }),
         });
       } catch { /* non-critical */ }

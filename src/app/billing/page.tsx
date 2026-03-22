@@ -2,10 +2,21 @@
 
 import { Layout } from '@/components/Layout';
 import { Billing } from '@/components/Billing';
+import { useUser } from '@clerk/nextjs';
 
 export default function BillingPage() {
+  const { user } = useUser();
+
+  const userData = user ? {
+    id: user.id,
+    username: user.username || user.primaryEmailAddress?.emailAddress || '',
+    displayName: user.fullName || user.firstName || '',
+    profileImage: user.imageUrl || '',
+    authMethod: 'clerk' as const,
+  } : null;
+
   return (
-    <Layout>
+    <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>
       <Billing />
     </Layout>
   );
