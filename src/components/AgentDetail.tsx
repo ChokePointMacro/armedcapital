@@ -4,8 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, RefreshCw, Loader2, CheckCircle2, XCircle, AlertTriangle,
   Brain, Share2, BarChart3, Server, Target, DollarSign, Zap, Crosshair,
-  Plus, ChevronDown, ChevronRight, Send,
-  Activity, TrendingUp, Eye, FileText, Cpu, Gauge,
+  Plus, ChevronDown, ChevronRight, Send, Play, Ban, Flame, Trophy,
+  Activity, TrendingUp, Eye, FileText, Cpu, Gauge, Clock, Sparkles,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import Link from 'next/link';
@@ -67,6 +67,24 @@ interface Task {
   completed_at: string | null;
   estimated_cost: string | null;
   actual_cost: string | null;
+  prompt: string | null;
+  run_endpoint: string | null;
+}
+
+interface ProductivityScore {
+  agentId: string;
+  tasksCompleted: number;
+  tasksFailed: number;
+  tasksIgnored: number;
+  tasksQueued: number;
+  completionRate: number;
+  avgCompletionTimeMs: number;
+  totalCostUsd: number;
+  costEfficiency: number;
+  streak: number;
+  lastActive: string | null;
+  score: number;
+  grade: 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -123,6 +141,24 @@ const STATUS_COLORS: Record<string, string> = {
   failed: 'text-red-400 bg-red-400/10',
 };
 
+const GRADE_COLORS: Record<string, string> = {
+  S: 'text-btc-orange',
+  A: 'text-green-400',
+  B: 'text-blue-400',
+  C: 'text-yellow-400',
+  D: 'text-orange-400',
+  F: 'text-red-400',
+};
+
+const GRADE_BG: Record<string, string> = {
+  S: 'bg-btc-orange/10 border-btc-orange/30',
+  A: 'bg-green-400/10 border-green-400/30',
+  B: 'bg-blue-400/10 border-blue-400/30',
+  C: 'bg-yellow-400/10 border-yellow-400/30',
+  D: 'bg-orange-400/10 border-orange-400/30',
+  F: 'bg-red-400/10 border-red-400/30',
+};
+
 // ── Risk Score Bar ───────────────────────────────────────────────────────────
 
 function RiskBar({ score }: { score: number }) {
@@ -155,6 +191,139 @@ function relativeTime(dateStr: string | null): string {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+// ── Productivity Score Panel ─────────────────────────────────────────────────
+
+function ProductivityPanel({ productivity }: { productivity: ProductivityScore | null }) {
+  if (!productivity) {
+    return (
+      <div className="border border-gray-800 rounded-xl bg-gray-950/80 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Trophy size={16} className="text-gray-500" />
+          <h3 className="text-xs font-mono uppercase tracking-wider text-gray-500">Productivity</h3>
+        </div>
+        <div className="text-center py-6 text-gray-600 text-xs font-mono">Loading productivity data...</div>
+      </div>
+    );
+  }
+
+  const gradeColor = GRADE_COLORS[productivity.grade] || 'text-gray-400';
+  const gradeBg = GRADE_BG[productivity.grade] || 'bg-gray-400/10 border-gray-400/30';
+
+  // Format avg completion time
+  const avgTimeStr = productivity.avgCompletionTimeMs > 0
+    ? productivity.avgCompletionTimeMs < 60000
+      ? `${Math.round(productivity.avgCompletionTimeMs / 1000)}s`
+      : productivity.avgCompletionTimeMs < 3600000
+        ? `${Math.round(productivity.avgCompletionTimeMs / 60000)}m`
+        : `${(productivity.avgCompletionTimeMs / 3600000).toFixed(1)}h`
+    : '—';
+
+  return (
+    <div className="border border-gray-800 rounded-xl bg-gray-950/80 p-5 flex flex-col">
+      <div className="flex items-center gap-2 mb-4">
+        <Trophy size={16} className="text-gray-500" />
+        <h3 className="text-xs font-mono uppercase tracking-wider text-gray-500">Productivity</h3>
+        <span className="text-[10px] font-mono text-gray-600 ml-auto">Score: {productivity.score}/100</span>
+      </div>
+
+      {/* Grade + Score circle */}
+      <div className="flex items-center gap-5 mb-5">
+        <div className={`w-16 h-16 rounded-xl border-2 ${gradeBg} flex flex-col items-center justify-center`}>
+          <span className={`text-2xl font-black font-mono ${gradeColor}`}>{productivity.grade}</span>
+          <span className="text-[9px] font-mono text-gray-500">GRADE</span>
+        </div>
+
+        {/* Score bar */}
+        <div className="flex-1">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-mono text-gray-600 uppercase">Composite Score</span>
+            <span className={`text-sm font-mono font-bold ${gradeColor}`}>{productivity.score}</span>
+          </div>
+          <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                productivity.score >= 80 ? 'bg-green-500' :
+                productivity.score >= 60 ? 'bg-blue-500' :
+                productivity.score >= 40 ? 'bg-yellow-500' :
+                'bg-red-500'
+              }`}
+              style={{ width: `${productivity.score}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-1">
+            <span className="text-[9px] font-mono text-gray-700">0</span>
+            <span className="text-[9px] font-mono text-gray-700">100</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats grid */}
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="bg-gray-900/60 rounded-lg p-2.5 text-center">
+          <div className="text-lg font-mono font-bold text-green-400">{productivity.tasksCompleted}</div>
+          <div className="text-[9px] font-mono text-gray-600 uppercase">Completed</div>
+        </div>
+        <div className="bg-gray-900/60 rounded-lg p-2.5 text-center">
+          <div className="text-lg font-mono font-bold text-red-400">{productivity.tasksFailed}</div>
+          <div className="text-[9px] font-mono text-gray-600 uppercase">Failed</div>
+        </div>
+        <div className="bg-gray-900/60 rounded-lg p-2.5 text-center">
+          <div className="text-lg font-mono font-bold text-blue-400">{productivity.tasksQueued}</div>
+          <div className="text-[9px] font-mono text-gray-600 uppercase">Queued</div>
+        </div>
+      </div>
+
+      {/* Detail metrics */}
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+            <CheckCircle2 size={10} /> Completion Rate
+          </div>
+          <span className={`text-xs font-mono font-semibold ${productivity.completionRate >= 80 ? 'text-green-400' : productivity.completionRate >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>
+            {productivity.completionRate}%
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+            <Flame size={10} /> Streak
+          </div>
+          <span className="text-xs font-mono font-semibold text-btc-orange">
+            {productivity.streak > 0 ? `${productivity.streak} consecutive` : 'None'}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+            <Clock size={10} /> Avg Time
+          </div>
+          <span className="text-xs font-mono text-gray-300">{avgTimeStr}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+            <DollarSign size={10} /> Total Cost
+          </div>
+          <span className="text-xs font-mono text-green-400">${productivity.totalCostUsd.toFixed(2)}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500">
+            <Sparkles size={10} /> Efficiency
+          </div>
+          <span className="text-xs font-mono text-gray-300">
+            {productivity.costEfficiency === 999 ? '∞' : `${productivity.costEfficiency} tasks/$`}
+          </span>
+        </div>
+      </div>
+
+      {/* Last active */}
+      <div className="mt-auto pt-3 border-t border-gray-800/50">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-mono text-gray-600">Last Active</span>
+          <span className="text-[10px] font-mono text-gray-500">{relativeTime(productivity.lastActive)}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Quadrant: Availability & Cost ────────────────────────────────────────────
@@ -255,12 +424,18 @@ function AvailabilityQuadrant({ agent }: { agent: AgentDef }) {
 function TaskQueueQuadrant({
   tasks,
   onApprove,
+  onDeny,
+  onExecute,
+  onSeed,
   onIgnore,
   onAddTask,
   loading,
 }: {
   tasks: Task[];
   onApprove: (id: string) => void;
+  onDeny: (id: string) => void;
+  onExecute: (id: string) => void;
+  onSeed: () => void;
   onIgnore: (id: string) => void;
   onAddTask: (title: string, description: string, priority: Task['priority']) => void;
   loading: boolean;
@@ -285,6 +460,13 @@ function TaskQueueQuadrant({
         <FileText size={16} className="text-gray-500" />
         <h3 className="text-xs font-mono uppercase tracking-wider text-gray-500">Task Queue</h3>
         <span className="text-[10px] font-mono text-gray-600 ml-auto">{tasks.length} pending</span>
+        <button
+          onClick={onSeed}
+          className="p-1 rounded hover:bg-gray-800 text-gray-500 hover:text-purple-400 transition-colors"
+          title="Seed domain tasks"
+        >
+          <Sparkles size={14} />
+        </button>
         <button
           onClick={() => setShowAdd(!showAdd)}
           className="p-1 rounded hover:bg-gray-800 text-gray-500 hover:text-btc-orange transition-colors"
@@ -376,6 +558,19 @@ function TaskQueueQuadrant({
                 )}
               </div>
             </div>
+            {/* Prompt preview for tasks with prompts */}
+            {task.prompt && (
+              <details className="mt-2">
+                <summary className="text-[9px] font-mono text-purple-400/70 cursor-pointer hover:text-purple-400 transition-colors">
+                  View AI Prompt
+                </summary>
+                <div className="mt-1.5 bg-gray-800/60 rounded-lg p-2.5 max-h-24 overflow-y-auto">
+                  <pre className="text-[10px] font-mono text-gray-400 whitespace-pre-wrap leading-relaxed">{task.prompt.slice(0, 400)}{task.prompt.length > 400 ? '...' : ''}</pre>
+                </div>
+              </details>
+            )}
+
+            {/* Queued: Approve or Deny */}
             {task.status === 'queued' && (
               <div className="flex gap-2 mt-2.5 pt-2 border-t border-gray-800/50">
                 <button
@@ -385,11 +580,36 @@ function TaskQueueQuadrant({
                   <CheckCircle2 size={10} /> Approve
                 </button>
                 <button
+                  onClick={() => onDeny(task.id)}
+                  className="flex items-center gap-1 text-[10px] font-mono text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2.5 py-1 hover:bg-red-400/20 transition-colors"
+                >
+                  <Ban size={10} /> Deny
+                </button>
+                <button
                   onClick={() => onIgnore(task.id)}
-                  className="flex items-center gap-1 text-[10px] font-mono text-gray-500 bg-gray-500/10 border border-gray-500/20 rounded px-2.5 py-1 hover:bg-gray-500/20 transition-colors"
+                  className="flex items-center gap-1 text-[10px] font-mono text-gray-500 bg-gray-500/10 border border-gray-500/20 rounded px-2.5 py-1 hover:bg-gray-500/20 transition-colors ml-auto"
                 >
                   <XCircle size={10} /> Ignore
                 </button>
+              </div>
+            )}
+
+            {/* Approved: Execute */}
+            {task.status === 'approved' && (
+              <div className="flex gap-2 mt-2.5 pt-2 border-t border-gray-800/50">
+                <button
+                  onClick={() => onExecute(task.id)}
+                  className="flex items-center gap-1 text-[10px] font-mono text-btc-orange bg-btc-orange/10 border border-btc-orange/30 rounded px-2.5 py-1 hover:bg-btc-orange/20 transition-colors"
+                >
+                  <Play size={10} /> Execute
+                </button>
+              </div>
+            )}
+
+            {/* Running: spinner */}
+            {task.status === 'running' && (
+              <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-gray-800/50 text-[10px] font-mono text-amber-400">
+                <Loader2 size={10} className="animate-spin" /> Executing...
               </div>
             )}
           </div>
@@ -562,6 +782,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [agent, setAgent] = useState<AgentDef | null>(null);
   const [queuedTasks, setQueuedTasks] = useState<Task[]>([]);
   const [completedTasks, setCompletedTasks] = useState<Task[]>([]);
+  const [productivity, setProductivity] = useState<ProductivityScore | null>(null);
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -595,6 +816,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       const data = await res.json();
       setQueuedTasks(data.queued || []);
       setCompletedTasks(data.completed || []);
+      if (data.productivity) setProductivity(data.productivity);
     } catch {
       // Silently fail — tasks will just be empty
     } finally {
@@ -632,6 +854,61 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       if (ignored) {
         setQueuedTasks(prev => prev.filter(t => t.id !== taskId));
         setCompletedTasks(prev => [{ ...ignored, status: 'ignored' as const }, ...prev]);
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleDeny = async (taskId: string) => {
+    try {
+      await apiFetch(`/api/admin/agents/${agentId}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'deny', taskId }),
+      });
+      const denied = queuedTasks.find(t => t.id === taskId);
+      if (denied) {
+        setQueuedTasks(prev => prev.filter(t => t.id !== taskId));
+        setCompletedTasks(prev => [{ ...denied, status: 'failed' as const, result_summary: 'Denied by operator' }, ...prev]);
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleExecute = async (taskId: string) => {
+    try {
+      // Optimistic: show running state
+      setQueuedTasks(prev =>
+        prev.map(t => t.id === taskId ? { ...t, status: 'running' as const } : t)
+      );
+      const res = await apiFetch(`/api/admin/agents/${agentId}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'execute', taskId }),
+      });
+      const data = await res.json();
+      if (data.result) {
+        // Move to completed
+        setQueuedTasks(prev => prev.filter(t => t.id !== taskId));
+        setCompletedTasks(prev => [{
+          ...data.result,
+        }, ...prev]);
+      }
+      // Refresh productivity after execution
+      fetchTasks();
+    } catch {
+      // Revert to approved
+      setQueuedTasks(prev =>
+        prev.map(t => t.id === taskId && t.status === 'running' ? { ...t, status: 'approved' as const } : t)
+      );
+    }
+  };
+
+  const handleSeed = async () => {
+    try {
+      const res = await apiFetch(`/api/admin/agents/${agentId}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'seed' }),
+      });
+      const data = await res.json();
+      if (data.seeded && data.seeded.length > 0) {
+        setQueuedTasks(prev => [...data.seeded, ...prev]);
       }
     } catch { /* ignore */ }
   };
@@ -735,25 +1012,33 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </div>
       </div>
 
-      {/* 4 Quadrant Grid */}
+      {/* 5-Panel Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Q1: Availability & Cost */}
-        <AvailabilityQuadrant agent={agent} />
+        {/* Q1: Productivity Score */}
+        <ProductivityPanel productivity={productivity} />
 
         {/* Q2: Task Queue */}
         <TaskQueueQuadrant
           tasks={queuedTasks}
           onApprove={handleApprove}
+          onDeny={handleDeny}
+          onExecute={handleExecute}
+          onSeed={handleSeed}
           onIgnore={handleIgnore}
           onAddTask={handleAddTask}
           loading={tasksLoading}
         />
 
-        {/* Q3: Recently Completed */}
+        {/* Q3: Availability & Cost */}
+        <AvailabilityQuadrant agent={agent} />
+
+        {/* Q4: Recently Completed */}
         <CompletedQuadrant tasks={completedTasks} />
 
-        {/* Q4: Agent Intelligence */}
-        <IntelligenceQuadrant agent={agent} />
+        {/* Q5: Agent Intelligence — full width */}
+        <div className="lg:col-span-2">
+          <IntelligenceQuadrant agent={agent} />
+        </div>
       </div>
     </div>
   );
