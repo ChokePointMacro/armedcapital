@@ -23,6 +23,7 @@ interface TaskRow {
   actual_cost: string | null;
   prompt: string | null;
   run_endpoint: string | null;
+  result_content: string | null;
 }
 
 export interface ProductivityScore {
@@ -225,6 +226,30 @@ export async function POST(
         // Execute an approved task by calling its run endpoint
         const { taskId } = body;
 
+        // Budget check before execution
+        try {
+          const { checkBudget, recordSpend, logAuditEvent, routeModel, addNotification } = await import('@/lib/agentBus');
+          const estimatedCost = 0.01; // Default estimate per task
+          const budgetCheck = checkBudget(agentId, 'operations', estimatedCost);
+          if (!budgetCheck.allowed) {
+            await logAuditEvent({
+              type: 'budget_event',
+              agentId,
+              action: `Task ${taskId} blocked by budget: ${budgetCheck.reason}`,
+              details: { taskId, reason: budgetCheck.reason },
+            });
+            addNotification({
+              type: 'budget_exceeded',
+              title: 'Task Blocked by Budget',
+              message: `${agentId}: ${budgetCheck.reason}`,
+              agentId,
+              severity: 'error',
+              actionUrl: `/agents/${agentId}`,
+            });
+            return NextResponse.json({ error: budgetCheck.reason, budgetBlocked: true }, { status: 429 });
+          }
+        } catch { /* budget module not critical */ }
+
         // Mark as running
         const { data: task, error: fetchErr } = await supabase
           .from('agent_tasks')
@@ -236,18 +261,38 @@ export async function POST(
 
         if (fetchErr || !task) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
 
+        // Multi-model routing
+        let selectedModel: string | undefined;
+        try {
+          const { routeModel } = await import('@/lib/agentBus');
+          const route = routeModel(agentId);
+          selectedModel = route.model;
+        } catch { /* fallback to default */ }
+
         // Execute asynchronously (don't block the response)
         const runEndpoint = task.run_endpoint;
         const prompt = task.prompt;
 
         if (runEndpoint && prompt) {
           // Fire and forget — execution happens in background
-          executeTask(supabase, task, runEndpoint, prompt).catch(err => {
+          executeTask(supabase, task, runEndpoint, prompt, selectedModel).catch(err => {
             console.error(`[Agent ${agentId}] Task ${taskId} execution failed:`, err);
           });
         }
 
-        return NextResponse.json({ task, action: 'executing' });
+        // Log to audit
+        try {
+          const { logAuditEvent } = await import('@/lib/agentBus');
+          await logAuditEvent({
+            type: 'task_execution',
+            agentId,
+            action: `Executing task: ${task.title}`,
+            details: { taskId, runEndpoint, model: selectedModel },
+            modelUsed: selectedModel,
+          });
+        } catch { /* audit not critical */ }
+
+        return NextResponse.json({ task, action: 'executing', model: selectedModel });
       }
 
       case 'complete': {
@@ -305,7 +350,7 @@ export async function POST(
 
 // ── Task Execution Engine ────────────────────────────────────────────────────
 
-async function executeTask(supabase: any, task: any, runEndpoint: string, prompt: string) {
+async function executeTask(supabase: any, task: any, runEndpoint: string, prompt: string, model?: string) {
   const startTime = Date.now();
   try {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
@@ -315,7 +360,7 @@ async function executeTask(supabase: any, task: any, runEndpoint: string, prompt
     const res = await fetch(`${baseUrl}${runEndpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, taskId: task.id, agentId: task.agent_id }),
+      body: JSON.stringify({ prompt, taskId: task.id, agentId: task.agent_id, model }),
     });
 
     const elapsed = Date.now() - startTime;
@@ -323,26 +368,73 @@ async function executeTask(supabase: any, task: any, runEndpoint: string, prompt
 
     if (res.ok) {
       const result = await res.json().catch(() => ({}));
+      const fullContent = result.content || result.text || result.report || result.output || result.summary || JSON.stringify(result, null, 2);
       await supabase
         .from('agent_tasks')
         .update({
           status: 'completed',
           result_summary: result.summary || result.message || `Task completed in ${elapsed}ms`,
+          result_content: typeof fullContent === 'string' ? fullContent.slice(0, 50000) : JSON.stringify(fullContent).slice(0, 50000),
           actual_cost: costEstimate,
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq('id', task.id);
+
+      // Record spend + audit
+      try {
+        const { recordSpend, logAuditEvent, addNotification } = await import('@/lib/agentBus');
+        const costNum = elapsed * 0.00001;
+        recordSpend(task.agent_id, 'operations', costNum);
+        await logAuditEvent({
+          type: 'task_execution',
+          agentId: task.agent_id,
+          action: `Task completed: ${task.title}`,
+          details: { taskId: task.id, elapsed, model },
+          latencyMs: elapsed,
+          modelUsed: model,
+          costUsd: costNum,
+        });
+        addNotification({
+          type: 'task_completed',
+          title: `Task Completed: ${task.title}`,
+          message: result.summary || `Executed in ${elapsed}ms`,
+          agentId: task.agent_id,
+          severity: 'success',
+          actionUrl: `/agents/${task.agent_id}`,
+        });
+      } catch { /* bus not critical */ }
     } else {
+      const errBody = await res.text().catch(() => '');
       await supabase
         .from('agent_tasks')
         .update({
           status: 'failed',
           result_summary: `HTTP ${res.status}: ${res.statusText}. Elapsed: ${elapsed}ms`,
+          result_content: errBody.slice(0, 10000) || null,
           actual_cost: costEstimate,
           updated_at: new Date().toISOString(),
         })
         .eq('id', task.id);
+
+      try {
+        const { logAuditEvent, addNotification } = await import('@/lib/agentBus');
+        await logAuditEvent({
+          type: 'agent_error',
+          agentId: task.agent_id,
+          action: `Task failed: ${task.title} (HTTP ${res.status})`,
+          details: { taskId: task.id, status: res.status, elapsed },
+          latencyMs: elapsed,
+        });
+        addNotification({
+          type: 'task_failed',
+          title: `Task Failed: ${task.title}`,
+          message: `HTTP ${res.status}: ${res.statusText}`,
+          agentId: task.agent_id,
+          severity: 'error',
+          actionUrl: `/agents/${task.agent_id}`,
+        });
+      } catch { /* bus not critical */ }
     }
   } catch (err: any) {
     await supabase
@@ -350,9 +442,27 @@ async function executeTask(supabase: any, task: any, runEndpoint: string, prompt
       .update({
         status: 'failed',
         result_summary: `Execution error: ${err.message}`,
+        result_content: err.stack || null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', task.id);
+
+    try {
+      const { logAuditEvent, addNotification } = await import('@/lib/agentBus');
+      await logAuditEvent({
+        type: 'agent_error',
+        agentId: task.agent_id,
+        action: `Task error: ${err.message}`,
+        details: { taskId: task.id, error: err.message },
+      });
+      addNotification({
+        type: 'task_failed',
+        title: `Task Error`,
+        message: err.message,
+        agentId: task.agent_id,
+        severity: 'error',
+      });
+    } catch { /* bus not critical */ }
   }
 }
 

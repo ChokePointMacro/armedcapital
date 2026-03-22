@@ -5,7 +5,7 @@ import {
   ArrowLeft, RefreshCw, Loader2, CheckCircle2, XCircle, AlertTriangle,
   Brain, Share2, BarChart3, Server, Target, DollarSign, Zap, Crosshair,
   Plus, ChevronDown, ChevronRight, Send, Play, Ban, Flame, Trophy,
-  Activity, TrendingUp, Eye, FileText, Cpu, Gauge, Clock, Sparkles,
+  Activity, TrendingUp, Eye, FileText, Cpu, Gauge, Clock, Sparkles, ExternalLink, X,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import Link from 'next/link';
@@ -69,6 +69,7 @@ interface Task {
   actual_cost: string | null;
   prompt: string | null;
   run_endpoint: string | null;
+  result_content: string | null;
 }
 
 interface ProductivityScore {
@@ -429,6 +430,7 @@ function TaskQueueQuadrant({
   onSeed,
   onIgnore,
   onAddTask,
+  onViewReport,
   loading,
 }: {
   tasks: Task[];
@@ -438,6 +440,7 @@ function TaskQueueQuadrant({
   onSeed: () => void;
   onIgnore: (id: string) => void;
   onAddTask: (title: string, description: string, priority: Task['priority']) => void;
+  onViewReport: (task: Task) => void;
   loading: boolean;
 }) {
   const [showAdd, setShowAdd] = useState(false);
@@ -612,6 +615,18 @@ function TaskQueueQuadrant({
                 <Loader2 size={10} className="animate-spin" /> Executing...
               </div>
             )}
+
+            {/* Completed in queue — show report link */}
+            {task.status === 'completed' && (task.result_content || task.result_summary) && (
+              <div className="flex gap-2 mt-2.5 pt-2 border-t border-gray-800/50">
+                <button
+                  onClick={() => onViewReport(task)}
+                  className="flex items-center gap-1 text-[10px] font-mono text-btc-orange bg-btc-orange/10 border border-btc-orange/30 rounded px-2.5 py-1 hover:bg-btc-orange/20 transition-colors"
+                >
+                  <ExternalLink size={10} /> View Report
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -621,7 +636,7 @@ function TaskQueueQuadrant({
 
 // ── Quadrant: Recently Completed ─────────────────────────────────────────────
 
-function CompletedQuadrant({ tasks }: { tasks: Task[] }) {
+function CompletedQuadrant({ tasks, onViewReport }: { tasks: Task[]; onViewReport: (task: Task) => void }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
@@ -677,6 +692,15 @@ function CompletedQuadrant({ tasks }: { tasks: Task[] }) {
                     <div className="text-[10px] font-mono text-gray-600">
                       Actual cost: <span className="text-green-400">{task.actual_cost}</span>
                     </div>
+                  )}
+                  {/* View Report button */}
+                  {(task.result_content || task.result_summary) && task.status === 'completed' && (
+                    <button
+                      onClick={() => onViewReport(task)}
+                      className="mt-2 flex items-center gap-1.5 text-[10px] font-mono text-btc-orange bg-btc-orange/10 border border-btc-orange/30 rounded px-3 py-1.5 hover:bg-btc-orange/20 transition-colors w-full justify-center"
+                    >
+                      <ExternalLink size={10} /> View Full Report
+                    </button>
                   )}
                 </div>
               )}
@@ -776,6 +800,83 @@ function IntelligenceQuadrant({ agent }: { agent: AgentDef }) {
   );
 }
 
+// ── Report Viewer Modal ──────────────────────────────────────────────────────
+
+function ReportViewer({
+  task,
+  onClose,
+}: {
+  task: Task;
+  onClose: () => void;
+}) {
+  const content = task.result_content || task.result_summary || 'No report content available.';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="relative w-full max-w-3xl max-h-[85vh] bg-gray-950 border border-gray-700 rounded-2xl shadow-2xl flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-800">
+          <FileText size={18} className="text-btc-orange" />
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-bold text-gray-100 truncate">{task.title}</h2>
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${STATUS_COLORS[task.status]}`}>
+                {task.status.toUpperCase()}
+              </span>
+              <span className="text-[10px] font-mono text-gray-600">
+                {task.completed_at ? relativeTime(task.completed_at) : relativeTime(task.updated_at)}
+              </span>
+              {task.actual_cost && (
+                <span className="text-[10px] font-mono text-green-400/70">Cost: {task.actual_cost}</span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Report content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {task.result_summary && task.result_content && (
+            <div className="mb-4 bg-gray-900/80 border border-gray-800 rounded-lg p-3">
+              <div className="text-[10px] font-mono text-gray-600 uppercase mb-1">Summary</div>
+              <div className="text-xs text-gray-300 leading-relaxed">{task.result_summary}</div>
+            </div>
+          )}
+          <div className="prose prose-invert prose-sm max-w-none">
+            <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap leading-relaxed bg-gray-900/60 rounded-lg p-4 border border-gray-800 overflow-x-auto">
+              {content}
+            </pre>
+          </div>
+        </div>
+
+        {/* Footer with metadata */}
+        <div className="flex items-center gap-4 px-6 py-3 border-t border-gray-800 text-[10px] font-mono text-gray-600">
+          <span>Agent: {task.agent_id}</span>
+          <span>Task: {task.id}</span>
+          {task.run_endpoint && <span>Endpoint: {task.run_endpoint}</span>}
+          <div className="flex-1" />
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(content);
+            }}
+            className="text-gray-500 hover:text-btc-orange transition-colors px-2 py-1 rounded hover:bg-gray-800"
+          >
+            Copy to clipboard
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function AgentDetail({ agentId }: { agentId: string }) {
@@ -786,6 +887,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewingReport, setViewingReport] = useState<Task | null>(null);
 
   // Fetch agent data
   const fetchAgent = useCallback(async () => {
@@ -1026,6 +1128,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           onSeed={handleSeed}
           onIgnore={handleIgnore}
           onAddTask={handleAddTask}
+          onViewReport={setViewingReport}
           loading={tasksLoading}
         />
 
@@ -1033,13 +1136,18 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         <AvailabilityQuadrant agent={agent} />
 
         {/* Q4: Recently Completed */}
-        <CompletedQuadrant tasks={completedTasks} />
+        <CompletedQuadrant tasks={completedTasks} onViewReport={setViewingReport} />
 
         {/* Q5: Agent Intelligence — full width */}
         <div className="lg:col-span-2">
           <IntelligenceQuadrant agent={agent} />
         </div>
       </div>
+
+      {/* Report Viewer Modal */}
+      {viewingReport && (
+        <ReportViewer task={viewingReport} onClose={() => setViewingReport(null)} />
+      )}
     </div>
   );
 }

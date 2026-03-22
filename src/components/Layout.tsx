@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
@@ -8,6 +8,7 @@ import { Menu, X } from 'lucide-react';
 import { SignInButton, useClerk } from '@clerk/nextjs';
 import { CPMLogo } from './CPMLogo';
 import { Dropdown } from './Dropdown';
+import { NotificationBell } from './NotificationBell';
 import MatrixBackground from './MatrixBackground';
 import type { UserData } from '@/types';
 
@@ -22,6 +23,8 @@ const NAV_ITEMS = [
   { to: '/usage', label: 'Usage' },
   { to: '/agents', label: 'Agents' },
   { to: '/org', label: 'Org' },
+  { to: '/traffic', label: 'Traffic' },
+  { to: '/audit', label: 'Audit' },
 ];
 
 const AUTH_NAV_ITEMS = [
@@ -56,6 +59,26 @@ export const Layout = ({ children, user, onLogout, onLogin }: {
   const pathname = usePathname();
   const { signOut } = useClerk();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Traffic beacon — tracks page views and device info
+  useEffect(() => {
+    const beacon = async () => {
+      try {
+        await fetch('/api/admin/traffic', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            page: pathname,
+            screenRes: typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height}` : null,
+            userId: user?.id || null,
+            userName: user?.name || null,
+            userEmail: user?.email || null,
+          }),
+        });
+      } catch { /* non-critical */ }
+    };
+    beacon();
+  }, [pathname, user]);
 
   const handleLogout = () => {
     signOut({ redirectUrl: '/' });
@@ -98,6 +121,8 @@ export const Layout = ({ children, user, onLogout, onLogin }: {
             >
               {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
+
+            {user && <NotificationBell />}
 
             {user ? (
               <Dropdown user={user} onLogout={handleLogout} />
