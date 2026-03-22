@@ -162,3 +162,31 @@ CREATE POLICY "Allow all" ON app_settings FOR ALL USING (true);
 CREATE POLICY "Allow all" ON context_files FOR ALL USING (true);
 CREATE POLICY "Allow all" ON pending_auth FOR ALL USING (true);
 CREATE POLICY "Allow all" ON tradingview_signals FOR ALL USING (true);
+
+-- Agent Tasks (task queue, approvals, completed work)
+CREATE TABLE IF NOT EXISTS agent_tasks (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  agent_id TEXT NOT NULL,                          -- matches agent registry id
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  status TEXT DEFAULT 'queued'
+    CHECK (status IN ('queued', 'approved', 'running', 'completed', 'ignored', 'failed')),
+  priority TEXT DEFAULT 'medium'
+    CHECK (priority IN ('low', 'medium', 'high', 'critical')),
+  source TEXT DEFAULT 'system'
+    CHECK (source IN ('system', 'manual')),
+  result_summary TEXT,
+  files_modified TEXT[],
+  estimated_cost TEXT,
+  actual_cost TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_agent ON agent_tasks(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_created ON agent_tasks(created_at DESC);
+
+ALTER TABLE agent_tasks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all" ON agent_tasks FOR ALL USING (true);

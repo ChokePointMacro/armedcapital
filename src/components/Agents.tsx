@@ -7,6 +7,7 @@ import {
   Crosshair, DollarSign, Eye, Radio, Zap, Target, TrendingUp, TrendingDown,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import Link from 'next/link';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -212,7 +213,9 @@ function AgentCard({ agent }: { agent: AgentDef }) {
 
         {/* Name + version */}
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="text-sm font-mono text-gray-200">{agent.name}</span>
+          <Link href={`/agents/${agent.id}`} className="text-sm font-mono text-gray-200 hover:text-btc-orange transition-colors">
+            {agent.name}
+          </Link>
           <span className="text-[9px] font-mono text-gray-600">v{agent.version}</span>
         </div>
 
