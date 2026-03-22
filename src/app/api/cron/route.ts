@@ -42,17 +42,60 @@ export async function GET(request: NextRequest) {
       errors: [],
     };
 
-    // Process scheduled social posts
+    // Process scheduled social posts — actually post to X
     try {
       const pending = await getPendingScheduledPosts();
-      for (const post of pending) {
+
+      // Only post if scheduled_at is in the past (or within 5 min window)
+      const now = Date.now();
+      const postable = pending.filter((p: any) => {
+        const scheduledAt = new Date(p.scheduled_at).getTime();
+        return scheduledAt <= now + 5 * 60 * 1000;
+      });
+
+      for (const post of postable) {
         try {
-          // For now, mark as posted without actually posting
-          // In production, you'd fetch the user's X token and post
+          const content = (post.content || '').replace(/^\[(INSTAGRAM|SUBSTACK)\]\s*/i, '').trim();
+
+          // Skip non-tweet content (Instagram/Substack reminders)
+          if ((post.content || '').startsWith('[INSTAGRAM]') || (post.content || '').startsWith('[SUBSTACK]')) {
+            await updateScheduledPostStatus(post.id, 'posted');
+            results.postsProcessed++;
+            continue;
+          }
+
+          // Post to X via OAuth 1.0a
+          const apiKey = process.env.X_API_KEY;
+          const apiSecret = process.env.X_API_SECRET;
+          const accToken = process.env.X_ACCESS_TOKEN;
+          const accSecret = process.env.X_ACCESS_SECRET;
+
+          if (!apiKey || !apiSecret || !accToken || !accSecret) {
+            console.warn('[Cron] X OAuth 1.0a credentials not configured — skipping tweet');
+            await updateScheduledPostStatus(post.id, 'failed');
+            results.errors.push(`Post ${post.id}: X credentials not configured`);
+            continue;
+          }
+
+          const client = new TwitterApi({
+            appKey: apiKey,
+            appSecret: apiSecret,
+            accessToken: accToken,
+            accessSecret: accSecret,
+          });
+
+          const tweet = await client.v1.tweet(content.substring(0, 280));
+          console.log(`[Cron] ✓ Posted tweet ${tweet.id_str} for scheduled post ${post.id}`);
+
           await updateScheduledPostStatus(post.id, 'posted');
           results.postsProcessed++;
+
+          // Rate limit safety: wait 2s between tweets
+          if (postable.indexOf(post) < postable.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
         } catch (error) {
-          console.error(`Background task failed for post ${post.id}:`, error);
+          console.error(`[Cron] Failed to post tweet for post ${post.id}:`, error);
           await updateScheduledPostStatus(post.id, 'failed');
           results.errors.push(`Post ${post.id}: ${error}`);
         }
