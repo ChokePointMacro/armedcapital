@@ -14,23 +14,18 @@ import type { UserData } from '@/types';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Briefing' },
-  { to: '/markets', label: 'Markets' },
-  { to: '/reports', label: 'Reports' },
+  { to: '/markets-hub', label: 'Markets' },
   { to: '/automated', label: 'Automated' },
   { to: '/terminal', label: 'Terminal' },
   { to: '/scanner', label: 'Scanner' },
-  { to: '/trade-flow', label: 'Trade Flow' },
-  { to: '/usage', label: 'Usage' },
   { to: '/agents', label: 'Agents' },
   { to: '/org', label: 'Org' },
   { to: '/traffic', label: 'Traffic' },
-  { to: '/audit', label: 'Audit' },
-  { to: '/billing', label: 'Billing' },
+  { to: '/operations', label: 'Operations' },
 ];
 
 const AUTH_NAV_ITEMS = [
-  { to: '/compose', label: 'Compose' },
-  { to: '/schedule', label: 'Schedule' },
+  { to: '/studio', label: 'Studio' },
 ];
 
 function NavLink({ to, label, active, onClick }: { to: string; label: string; active: boolean; onClick?: () => void }) {
