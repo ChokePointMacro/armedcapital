@@ -23,6 +23,16 @@ interface Pivots { p: number; r1: number; r2: number; r3: number; s1: number; s2
 
 interface HistoryRec { symbol: string; candles: Candle[]; pivotLevels: Pivots | null; }
 
+interface TVSignal {
+  ticker?: string;
+  action?: string;
+  price?: number;
+  close?: number;
+  time?: string;
+  received_at?: string;
+  interval?: string;
+}
+
 interface Contract {
   symbol: string; side: 'CALL' | 'PUT'; strike: number | null;
   last: number | null; bid: number | null; ask: number | null;
@@ -54,6 +64,37 @@ function loadCustomSymbols(): string[] {
 }
 function saveCustomSymbols(syms: string[]) {
   localStorage.setItem(CUSTOM_KEY, JSON.stringify(syms));
+}
+
+/** Normalize symbol to match TradingView ticker format (strip dashes, slashes) */
+function normalizeTicker(sym: string): string {
+  return sym.replace(/[-/=^]/g, '').toUpperCase();
+}
+
+/** Hook: fetch TV signals for a given symbol */
+function useTVSignals(symbol: string): TVSignal[] {
+  const [signals, setSignals] = useState<TVSignal[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const ticker = normalizeTicker(symbol);
+    safeFetch(`/api/webhooks/tradingview?ticker=${encodeURIComponent(ticker)}&limit=20&source=db`)
+      .then(data => {
+        if (!cancelled && data?.signals?.length) setSignals(data.signals);
+      });
+    // Also try buffer source as fallback
+    safeFetch(`/api/webhooks/tradingview?ticker=${encodeURIComponent(ticker)}&limit=20`)
+      .then(data => {
+        if (!cancelled && data?.signals?.length) {
+          setSignals(prev => {
+            const existing = new Set(prev.map(s => s.received_at));
+            const newSigs = data.signals.filter((s: TVSignal) => !existing.has(s.received_at));
+            return newSigs.length ? [...prev, ...newSigs] : prev;
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [symbol]);
+  return signals;
 }
 
 const fp = (n: number | null, isIdx = false) => {
@@ -130,6 +171,7 @@ const CandleChart = ({
   showTimeframeSelector = true,
   pivots,
   opts,
+  signals = [],
 }: {
   candles: Candle[];
   price: number | null;
@@ -139,6 +181,7 @@ const CandleChart = ({
   showTimeframeSelector?: boolean;
   pivots?: Pivots | null;
   opts?: OptionsRec | null;
+  signals?: TVSignal[];
 }) => {
   const [zoomIdx, setZoomIdx] = useState(2); // default 0.1 (index 2)
   if (!candles.length) {
@@ -322,6 +365,42 @@ const CandleChart = ({
             </>
           )}
 
+          {/* TradingView Signal Markers */}
+          {signals.map((sig, i) => {
+            const sigPrice = sig.price ?? sig.close;
+            const sigTime = sig.received_at || sig.time;
+            if (!sigPrice || !sigTime) return null;
+            const sigTs = new Date(sigTime).getTime();
+            // Find nearest candle by timestamp
+            let bestIdx = candles.length - 1;
+            let bestDist = Infinity;
+            candles.forEach((c, ci) => {
+              const dist = Math.abs(c.t - sigTs);
+              if (dist < bestDist) { bestDist = dist; bestIdx = ci; }
+            });
+            const cx = sx(bestIdx) + cw / 2;
+            const isBuy = sig.action?.toLowerCase() === 'buy';
+            const isSell = sig.action?.toLowerCase() === 'sell';
+            const markerY = sy(sigPrice);
+            const col = isBuy ? '#10b981' : isSell ? '#ef4444' : '#f7931a';
+            const arrowD = isBuy
+              ? `M${cx},${markerY - 8} L${cx - 4},${markerY - 2} L${cx + 4},${markerY - 2} Z`  // up triangle
+              : isSell
+                ? `M${cx},${markerY + 8} L${cx - 4},${markerY + 2} L${cx + 4},${markerY + 2} Z`  // down triangle
+                : `M${cx - 3},${markerY} L${cx},${markerY - 3} L${cx + 3},${markerY} L${cx},${markerY + 3} Z`; // diamond
+            return (
+              <g key={`sig-${i}`}>
+                <path d={arrowD} fill={col} opacity={0.9} />
+                <line x1={cx} y1={markerY} x2={cx} y2={isBuy ? markerY + 12 : markerY - 12}
+                  stroke={col} strokeWidth={0.5} opacity={0.4} strokeDasharray="2,2" />
+                <text x={cx} y={isBuy ? markerY - 10 : markerY + 14}
+                  textAnchor="middle" fontSize={5} fontFamily="monospace" fill={col} opacity={0.8}>
+                  {(sig.action || 'ALERT').toUpperCase()}
+                </text>
+              </g>
+            );
+          })}
+
           {/* Y-axis labels */}
           {yLabels.map((v, i) => (
             <text key={i} x={W - 4} y={sy(v) + 3}
@@ -484,6 +563,7 @@ const TileCard = ({
   const [timeframe, setTimeframe] = useState<TimeframeKey>('1m');
   const [localCandles, setLocalCandles] = useState<Candle[]>(initialCandles);
   const [loading, setLoading] = useState(false);
+  const tvSignals = useTVSignals(tile.symbol);
 
   // Independent overlay timeframe for pivots/options levels on chart
   const [overlayTf, setOverlayTf] = useState<TimeframeKey>('1m');
@@ -642,6 +722,7 @@ const TileCard = ({
               onTimeframeChange={handleTimeframeChange}
               pivots={(tile.isCrypto || tile.isIndex) ? overlayPivots : undefined}
               opts={isEquity ? opts : undefined}
+              signals={tvSignals}
             />
           </div>
         </div>
@@ -661,6 +742,7 @@ const BtcHero = ({ tile, candles: initialCandles, pivots: initialPivots, watched
   const [loading, setLoading] = useState(false);
   const [overlayTf, setOverlayTf] = useState<TimeframeKey>('1m');
   const [overlayPivots, setOverlayPivots] = useState<Pivots | null>(initialPivots);
+  const btcSignals = useTVSignals('BTC-USD');
 
   useEffect(() => {
     if (timeframe === '1m') setLocalCandles(initialCandles);
@@ -793,6 +875,7 @@ const BtcHero = ({ tile, candles: initialCandles, pivots: initialPivots, watched
               timeframe={timeframe}
               onTimeframeChange={handleTimeframeChange}
               pivots={overlayPivots}
+              signals={btcSignals}
             />
           </div>
         </div>
