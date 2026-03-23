@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Activity, RefreshCw, Loader2, Shield, Server, Database,
-  Zap, CheckCircle2, AlertTriangle, Circle,
+  Zap, CheckCircle2, AlertTriangle, Circle, Archive,
   ChevronDown, ChevronRight, ThumbsUp, ThumbsDown, X, Play,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
@@ -60,9 +60,21 @@ interface DecisionEntry {
 
 type DecisionMap = Record<string, DecisionEntry>;
 
+interface ArchivedItem {
+  id: string;
+  title: string;
+  category: string;
+  priority: string;
+  description: string;
+  summary: string;
+  archivedAt: string;
+  execResult?: ExecResult;
+}
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const DECISIONS_KEY = 'armedcapital_progress_decisions';
+const ARCHIVE_KEY = 'armedcapital_progress_archive';
 
 const CATEGORY_META: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
   security: { label: 'Security', icon: <Shield size={14} />, color: 'text-red-400' },
@@ -107,6 +119,25 @@ function saveDecisions(map: DecisionMap) {
   try { window.localStorage.setItem(DECISIONS_KEY, JSON.stringify(map)); } catch {}
 }
 
+function loadArchive(): ArchivedItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(ARCHIVE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveArchive(items: ArchivedItem[]) {
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(items)); } catch {}
+}
+
+function buildSummary(item: ReadinessItem, execResult?: ExecResult): string {
+  if (execResult?.message) return execResult.message;
+  if (item.status === 'done') return `${item.title} — completed`;
+  return item.description;
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function Progress() {
@@ -119,9 +150,11 @@ export function Progress() {
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
+  const [archive, setArchive] = useState<ArchivedItem[]>([]);
+  const [showArchive, setShowArchive] = useState(false);
 
-  // Load persisted decisions
-  useEffect(() => { setDecisions(loadDecisions()); }, []);
+  // Load persisted decisions + archive
+  useEffect(() => { setDecisions(loadDecisions()); setArchive(loadArchive()); }, []);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -139,6 +172,47 @@ export function Progress() {
   }, []);
 
   useEffect(() => { fetchHealth(); }, [fetchHealth]);
+
+  // Auto-archive: move completed items (status=done or successful execution) to archive
+  useEffect(() => {
+    if (!data) return;
+    const checklist = data.readiness.checklist;
+    const currentArchiveIds = new Set(archive.map(a => a.id));
+    const toArchive: ArchivedItem[] = [];
+
+    for (const item of checklist) {
+      if (currentArchiveIds.has(item.id)) continue;
+
+      const d = decisions[item.id];
+      const isComplete = item.status === 'done';
+      const isExecutedSuccess = d?.decision === 'approved' && d.execResult?.success && !d.execResult?.requiresDeploy;
+
+      if (isComplete || isExecutedSuccess) {
+        toArchive.push({
+          id: item.id,
+          title: item.title,
+          category: item.category,
+          priority: item.priority,
+          description: item.description,
+          summary: buildSummary(item, d?.execResult),
+          archivedAt: new Date().toISOString(),
+          execResult: d?.execResult,
+        });
+      }
+    }
+
+    if (toArchive.length > 0) {
+      const updated = [...archive, ...toArchive];
+      setArchive(updated);
+      saveArchive(updated);
+      // Clean up decisions for archived items
+      const nextDecisions = { ...decisions };
+      toArchive.forEach(a => delete nextDecisions[a.id]);
+      setDecisions(nextDecisions);
+      saveDecisions(nextDecisions);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   // Execute a task via the API
   const executeTask = async (id: string): Promise<ExecResult | null> => {
@@ -264,7 +338,8 @@ export function Progress() {
   if (!data) return null;
 
   const { readiness, checks } = data;
-  const checklist = readiness.checklist;
+  const archivedIds = new Set(archive.map(a => a.id));
+  const checklist = readiness.checklist.filter(i => !archivedIds.has(i.id));
 
   // Counts
   const approvedCount = checklist.filter(i => decisions[i.id]?.decision === 'approved').length;
@@ -761,9 +836,50 @@ export function Progress() {
         </div>
       )}
 
+      {/* Archive */}
+      {archive.length > 0 && (
+        <div className="bg-gray-900/30 border border-gray-800/60 rounded-lg overflow-hidden">
+          <button
+            onClick={() => setShowArchive(!showArchive)}
+            className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-800/20 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              {showArchive ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
+              <Archive size={14} className="text-gray-500" />
+              <span className="text-xs font-mono text-gray-400 uppercase">Archive</span>
+              <span className="text-[10px] font-mono text-gray-600 ml-1">({archive.length} completed)</span>
+            </div>
+          </button>
+
+          {showArchive && (
+            <div className="border-t border-gray-800/60">
+              {archive
+                .sort((a, b) => new Date(b.archivedAt).getTime() - new Date(a.archivedAt).getTime())
+                .map(item => {
+                  const catMeta = CATEGORY_META[item.category];
+                  return (
+                    <div key={item.id} className="flex items-start gap-3 px-4 py-3 border-b border-gray-800/30 last:border-0">
+                      <CheckCircle2 size={14} className="text-green-500/60 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-gray-400">{item.title}</span>
+                          {catMeta && <span className={`text-[9px] font-mono ${catMeta.color}`}>{item.category}</span>}
+                        </div>
+                        <p className="text-[10px] text-gray-600 mt-0.5">{item.summary}</p>
+                        <p className="text-[9px] text-gray-700 mt-0.5">{new Date(item.archivedAt).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              }
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Footer */}
       <div className="text-center text-[10px] text-gray-600 border-t border-gray-800 pt-4">
-        Last checked {new Date(data.timestamp).toLocaleTimeString()} · {data.responseMs}ms
+        Last checked {new Date(data.timestamp).toLocaleTimeString()} · {data.responseMs}ms · {archive.length} archived
       </div>
     </div>
   );
