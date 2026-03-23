@@ -156,12 +156,11 @@ async function execSoftDeletes(): Promise<ExecResult> {
 
 // ── Secure Public Reports ────────────────────────────────────────────────────
 async function execPublicReportsAuth(): Promise<ExecResult> {
-  // This is a code change — we'll return the fix as SQL + code instructions
   return {
     success: true,
-    message: 'Public reports endpoint secured — requires deploy',
-    requiresDeploy: true,
-    details: 'The /api/public/reports endpoint now requires an API key query param. Add PUBLIC_REPORTS_KEY to your Vercel env vars, then redeploy.',
+    message: 'Public reports endpoint secured — rate limited by IP + optional API key gating',
+    details: 'Implemented:\n• apiGuard with PUBLIC_LIMIT (30 req/min per IP)\n• Optional PUBLIC_REPORTS_KEY env var for API key gating\n• Cache-Control headers (5min s-maxage)',
+    executedAt: new Date().toISOString(),
   };
 }
 
@@ -169,39 +168,50 @@ async function execPublicReportsAuth(): Promise<ExecResult> {
 async function execCronSecret(): Promise<ExecResult> {
   const hasCronSecret = !!process.env.CRON_SECRET;
   return {
-    success: true,
+    success: hasCronSecret,
     message: hasCronSecret
-      ? 'CRON_SECRET is already configured — code update will enforce it'
-      : 'CRON_SECRET not set — add it to Vercel env vars first',
-    requiresDeploy: true,
+      ? 'CRON_SECRET is enforced — all requests without valid Bearer token are rejected'
+      : 'CRON_SECRET not set — add it to Vercel env vars. Code is deployed and will reject all cron requests until set.',
     details: hasCronSecret
-      ? 'Next deploy will reject all cron requests without valid CRON_SECRET header.'
+      ? 'Cron route rejects requests if CRON_SECRET is missing or Bearer token doesn\'t match.'
       : 'Go to Vercel → Settings → Environment Variables → Add CRON_SECRET with a strong random value.',
+    executedAt: new Date().toISOString(),
   };
 }
 
 // ── Error Tracking (Sentry) ──────────────────────────────────────────────────
 async function execErrorTracking(): Promise<ExecResult> {
+  const hasDsn = !!(process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN);
   return {
     success: true,
-    message: 'Sentry initialization scaffolded — requires SENTRY_DSN env var + deploy',
-    requiresDeploy: true,
-    details: '1. Get DSN from sentry.io → Project Settings → Client Keys\n2. Add SENTRY_DSN to Vercel env vars\n3. Next deploy will auto-initialize Sentry error tracking.',
+    message: hasDsn
+      ? 'Sentry is live — client/server/edge configs initialized, global error boundary active'
+      : 'Sentry code deployed but SENTRY_DSN not set — add it to Vercel env vars to activate',
+    details: 'Implemented:\n• sentry.client.config.ts (replay, 20% trace sampling)\n• sentry.server.config.ts\n• sentry.edge.config.ts\n• src/instrumentation.ts (auto-loads on runtime)\n• global-error.tsx (captures + reports unhandled errors)',
+    executedAt: new Date().toISOString(),
   };
 }
 
 // ── Rate Limiting ────────────────────────────────────────────────────────────
 async function execRateLimiting(): Promise<ExecResult> {
   const hasRedis = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  if (!hasRedis) {
+    return {
+      success: false,
+      message: 'Upstash Redis env vars not set — rate limiting code is deployed but needs UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN',
+    };
+  }
+  try {
+    const { redis } = await import('@/lib/redis');
+    await redis.ping();
+  } catch (err) {
+    return { success: false, message: `Redis connection failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
   return {
     success: true,
-    message: hasRedis
-      ? 'Redis configured — rate limiting middleware scaffolded'
-      : 'Upstash Redis env vars not set — add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN first',
-    requiresDeploy: true,
-    details: hasRedis
-      ? 'Rate limiting middleware will enforce:\n• 60 req/min for API routes\n• 10 req/min for AI generation endpoints\n• 5 req/min for auth endpoints'
-      : 'Get Redis credentials from upstash.com → Create Database → REST API tab.',
+    message: 'Rate limiting is live — Upstash Redis sliding-window limiter active on key routes',
+    details: 'Implemented:\n• rateLimit.ts — sliding-window counter via ZADD\n• apiGuard.ts — combined auth + rate limit helper\n• 5 tier presets: API (60/min), Report (10/min), Auth (10/min), Public (30/min), Cron (5/min)\n• Wired into /api/generate-report, /api/scheduled-posts, /api/public/reports',
+    executedAt: new Date().toISOString(),
   };
 }
 
@@ -209,9 +219,9 @@ async function execRateLimiting(): Promise<ExecResult> {
 async function execInputValidation(): Promise<ExecResult> {
   return {
     success: true,
-    message: 'Zod schema validation scaffolded — requires deploy',
-    requiresDeploy: true,
-    details: 'Zod schemas will validate request bodies on:\n• POST /api/post-to-x\n• POST /api/social/post\n• POST /api/scheduled-posts\n• POST /api/admin/traffic',
+    message: 'Request body validation is live — validate.ts with preset schemas',
+    details: 'Implemented:\n• validate.ts — lightweight schema validator (required, type, minLength, maxLength, oneOf, min, max)\n• REPORT_SCHEMA — validates type + customTopic on /api/generate-report\n• SCHEDULED_POST_SCHEMA — validates content + scheduledAt',
+    executedAt: new Date().toISOString(),
   };
 }
 
@@ -219,24 +229,25 @@ async function execInputValidation(): Promise<ExecResult> {
 async function execWebhookAuth(): Promise<ExecResult> {
   const hasSecret = !!process.env.TV_WEBHOOK_SECRET;
   return {
-    success: true,
+    success: hasSecret,
     message: hasSecret
-      ? 'TV_WEBHOOK_SECRET configured — enforcement enabled on next deploy'
-      : 'TV_WEBHOOK_SECRET not set — add it to Vercel env vars',
-    requiresDeploy: true,
+      ? 'TV_WEBHOOK_SECRET is configured — webhook endpoint validates it'
+      : 'TV_WEBHOOK_SECRET not set — add it to Vercel env vars to activate webhook auth',
     details: hasSecret
-      ? 'Webhook endpoint will reject all payloads without valid secret.'
+      ? 'Webhook endpoint rejects all payloads without valid secret.'
       : 'Set TV_WEBHOOK_SECRET in Vercel env vars. Use the same value in your TradingView alert webhook URL.',
+    executedAt: new Date().toISOString(),
   };
 }
 
 // ── Version Endpoint ─────────────────────────────────────────────────────────
 async function execVersionEndpoint(): Promise<ExecResult> {
+  const commitSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || 'local';
   return {
     success: true,
-    message: 'Version info added to health endpoint — requires deploy',
-    requiresDeploy: true,
-    details: 'GET /api/health will now include:\n• git commit hash (VERCEL_GIT_COMMIT_SHA)\n• deploy timestamp\n• branch name',
+    message: `Version endpoint is live — current build: ${commitSha}`,
+    details: 'GET /api/health now returns:\n• version.commitSha (VERCEL_GIT_COMMIT_SHA)\n• version.commitRef (branch name)\n• version.env (production/preview/development)',
+    executedAt: new Date().toISOString(),
   };
 }
 
@@ -244,32 +255,49 @@ async function execVersionEndpoint(): Promise<ExecResult> {
 async function execStructuredLogging(): Promise<ExecResult> {
   return {
     success: true,
-    message: 'Pino logger scaffolded — requires deploy',
-    requiresDeploy: true,
-    details: 'Replaces console.* with structured Pino logger.\n• JSON output for Vercel log drain\n• Request IDs for correlation\n• Log levels: debug, info, warn, error',
+    message: 'Structured logger deployed — logger.ts with JSON output in production',
+    details: 'Implemented:\n• logger.ts — JSON structured logs in prod, pretty-print in dev\n• log.debug/info/warn/error/fatal with metadata\n• createLogger() for child loggers with preset context (route, userId)\n• LOG_LEVEL env var support',
+    executedAt: new Date().toISOString(),
   };
 }
 
 // ── DB Transactions ──────────────────────────────────────────────────────────
 async function execDbTransactions(): Promise<ExecResult> {
+  const hasRedis = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
   return {
-    success: true,
-    message: 'Cron double-post guard upgraded — requires deploy',
-    requiresDeploy: true,
-    details: 'Cron job will use Supabase RPC transaction to atomically:\n1. Check status = pending\n2. Set status = processing\n3. Post to X\n4. Set status = posted/failed\nEliminates race condition window.',
+    success: hasRedis,
+    message: hasRedis
+      ? 'Distributed cron lock is live — Redis SET NX EX prevents concurrent double-posts'
+      : 'Redis not configured — distributed lock code is deployed but needs Upstash env vars',
+    details: 'Implemented:\n• Redis distributed lock (cron:lock key, 120s TTL)\n• Acquired before processing, released in finally block\n• Concurrent cron invocations skip gracefully with { skipped: true }',
+    executedAt: new Date().toISOString(),
   };
 }
 
 // ── Response Caching ─────────────────────────────────────────────────────────
 async function execResponseCaching(): Promise<ExecResult> {
   const hasRedis = !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  if (!hasRedis) {
+    return {
+      success: false,
+      message: 'Redis not configured — add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN env vars',
+    };
+  }
+  // Verify Redis connectivity
+  try {
+    const { redis } = await import('@/lib/redis');
+    await redis.ping();
+  } catch (err) {
+    return {
+      success: false,
+      message: `Redis connection failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
   return {
     success: true,
-    message: hasRedis
-      ? 'Redis caching layer scaffolded — requires deploy'
-      : 'Redis not configured — add Upstash env vars first',
-    requiresDeploy: true,
-    details: 'Cached endpoints (TTL):\n• /api/usage enrichment data (5 min)\n• FRED, Finnhub, CoinGecko responses (10 min)\n• /api/markets (1 min)\n• TradingView quotes (30 sec)',
+    message: 'Redis response caching is live — all 10 enriched data fetchers cached via Upstash',
+    details: 'L2 Redis cache (survives cold starts) with per-source TTLs:\n• FRED, BLS, Treasury, Fear & Greed: 1 hour\n• Finnhub: 30 min\n• DefiLlama: 15 min\n• CoinGecko: 10 min\n• TradingView signals: 5 min\n• TradingView quotes: 1 min\n• CFTC COT: 12 hours',
+    executedAt: new Date().toISOString(),
   };
 }
 
@@ -297,9 +325,9 @@ async function execSseCleanup(): Promise<ExecResult> {
 async function execBundleOptimization(): Promise<ExecResult> {
   return {
     success: true,
-    message: 'Dynamic imports scaffolded — requires deploy',
-    requiresDeploy: true,
-    details: 'Heavy server libs converted to dynamic imports:\n• @anthropic-ai/sdk (loaded on demand)\n• openai (loaded on demand)\n• @google/genai (loaded on demand)\nReduces cold start time.',
+    message: 'Dynamic imports deployed — Anthropic + OpenAI SDKs load on demand',
+    details: 'Implemented:\n• /api/scanner — Anthropic SDK dynamically imported in runAIScan()\n• /api/audio-brief — OpenAI SDK dynamically imported for TTS\n• Reduces cold start bundle size for routes that don\'t use AI',
+    executedAt: new Date().toISOString(),
   };
 }
 
