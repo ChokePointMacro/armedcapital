@@ -1,7 +1,16 @@
 /**
  * Shared enriched data fetchers — FRED, Finnhub, Fear & Greed, CoinGecko
  * Used across Scanner, Terminal, Reports, Market Insights, etc.
+ *
+ * All fetchers are backed by Redis cache (survives serverless cold starts)
+ * with in-memory fallback if Redis is unavailable.
  */
+
+import {
+  cached,
+  TTL_GOVERNMENT, TTL_MARKET_DATA, TTL_CRYPTO, TTL_SENTIMENT,
+  TTL_WEEKLY, TTL_DEFI, TTL_REALTIME, TTL_QUOTES,
+} from './cache';
 
 // ── FRED (Federal Reserve Economic Data) ────────────────────────────────────
 
@@ -27,7 +36,7 @@ const FRED_SERIES = [
   { id: 'FEDFUNDS', label: 'Fed Funds Rate' },
 ];
 
-// In-memory cache for FRED data (1 hour TTL)
+// In-memory fallback cache for FRED data
 let fredCache: { data: FredData; ts: number } | null = null;
 const FRED_CACHE_TTL = 60 * 60 * 1000;
 
@@ -50,34 +59,36 @@ async function fetchFredSeries(seriesId: string): Promise<number | null> {
 }
 
 export async function fetchFredData(): Promise<FredData> {
-  // Return cached if fresh
+  // In-memory fast check
   if (fredCache && Date.now() - fredCache.ts < FRED_CACHE_TTL) return fredCache.data;
 
-  const results = await Promise.all(
-    FRED_SERIES.map(async (s) => ({
-      id: s.id,
-      label: s.label,
-      value: await fetchFredSeries(s.id),
-    }))
-  );
+  const data = await cached<FredData>('fred', TTL_GOVERNMENT, async () => {
+    const results = await Promise.all(
+      FRED_SERIES.map(async (s) => ({
+        id: s.id,
+        label: s.label,
+        value: await fetchFredSeries(s.id),
+      }))
+    );
 
-  const lookup = Object.fromEntries(results.map(r => [r.id, r.value]));
-  const hasData = results.some(r => r.value !== null);
+    const lookup = Object.fromEntries(results.map(r => [r.id, r.value]));
+    const hasData = results.some(r => r.value !== null);
 
-  const data: FredData = {
-    yieldCurve: [
-      { series: 'DGS2', label: '2Y', value: lookup['DGS2'] },
-      { series: 'DGS5', label: '5Y', value: lookup['DGS5'] },
-      { series: 'DGS10', label: '10Y', value: lookup['DGS10'] },
-      { series: 'DGS30', label: '30Y', value: lookup['DGS30'] },
-    ],
-    spread2s10s: lookup['T10Y2Y'],
-    breakeven5y: lookup['T5YIE'],
-    breakeven10y: lookup['T10YIE'],
-    initialClaims: lookup['ICSA'],
-    fedFundsRate: lookup['FEDFUNDS'],
-    available: hasData,
-  };
+    return {
+      yieldCurve: [
+        { series: 'DGS2', label: '2Y', value: lookup['DGS2'] },
+        { series: 'DGS5', label: '5Y', value: lookup['DGS5'] },
+        { series: 'DGS10', label: '10Y', value: lookup['DGS10'] },
+        { series: 'DGS30', label: '30Y', value: lookup['DGS30'] },
+      ],
+      spread2s10s: lookup['T10Y2Y'],
+      breakeven5y: lookup['T5YIE'],
+      breakeven10y: lookup['T10YIE'],
+      initialClaims: lookup['ICSA'],
+      fedFundsRate: lookup['FEDFUNDS'],
+      available: hasData,
+    };
+  });
 
   fredCache = { data, ts: Date.now() };
   return data;
@@ -182,16 +193,17 @@ async function fetchFinnhubInsiderTransactions(): Promise<InsiderTransaction[]> 
 export async function fetchFinnhubData(): Promise<FinnhubData> {
   if (finnhubCache && Date.now() - finnhubCache.ts < FINNHUB_CACHE_TTL) return finnhubCache.data;
 
-  const [earnings, insider] = await Promise.all([
-    fetchFinnhubEarnings(),
-    fetchFinnhubInsiderTransactions(),
-  ]);
-
-  const data: FinnhubData = {
-    earningsThisWeek: earnings,
-    insiderTransactions: insider,
-    available: earnings.length > 0 || insider.length > 0,
-  };
+  const data = await cached<FinnhubData>('finnhub', TTL_MARKET_DATA, async () => {
+    const [earnings, insider] = await Promise.all([
+      fetchFinnhubEarnings(),
+      fetchFinnhubInsiderTransactions(),
+    ]);
+    return {
+      earningsThisWeek: earnings,
+      insiderTransactions: insider,
+      available: earnings.length > 0 || insider.length > 0,
+    };
+  });
 
   finnhubCache = { data, ts: Date.now() };
   return data;
@@ -244,54 +256,57 @@ function classifyFearGreed(value: number): string {
 export async function fetchFearGreedIndex(): Promise<FearGreedData | null> {
   if (fgCache && Date.now() - fgCache.ts < FG_CACHE_TTL) return fgCache.data;
 
-  let result: FearGreedData | null = null;
+  const data = await cached<FearGreedData | null>('fear-greed', TTL_SENTIMENT, async () => {
+    let result: FearGreedData | null = null;
 
-  try {
-    const url = 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata';
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-      next: { revalidate: 3600 },
-    });
-    if (res.ok) {
-      const json = await res.json();
-      const fg = json.fear_and_greed;
-      if (fg) {
-        result = {
-          value: Math.round(fg.score),
-          label: fg.rating,
-          previousClose: Math.round(fg.previous_close),
-          oneWeekAgo: Math.round(fg.previous_1_week),
-          oneMonthAgo: Math.round(fg.previous_1_month),
-          timestamp: new Date().toISOString(),
-        };
-      }
-    }
-  } catch { /* fall through */ }
-
-  // Fallback endpoint
-  if (!result) {
     try {
-      const url = 'https://production.dataviz.cnn.io/index/fearandgreed/current';
+      const url = 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata';
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
         next: { revalidate: 3600 },
       });
       if (res.ok) {
         const json = await res.json();
-        result = {
-          value: Math.round(json.score || json.value || 50),
-          label: json.rating || classifyFearGreed(json.score || json.value || 50),
-          previousClose: Math.round(json.previous_close || json.score || 50),
-          oneWeekAgo: Math.round(json.previous_1_week || 50),
-          oneMonthAgo: Math.round(json.previous_1_month || 50),
-          timestamp: new Date().toISOString(),
-        };
+        const fg = json.fear_and_greed;
+        if (fg) {
+          result = {
+            value: Math.round(fg.score),
+            label: fg.rating,
+            previousClose: Math.round(fg.previous_close),
+            oneWeekAgo: Math.round(fg.previous_1_week),
+            oneMonthAgo: Math.round(fg.previous_1_month),
+            timestamp: new Date().toISOString(),
+          };
+        }
       }
-    } catch { /* give up */ }
-  }
+    } catch { /* fall through */ }
 
-  fgCache = { data: result, ts: Date.now() };
-  return result;
+    if (!result) {
+      try {
+        const url = 'https://production.dataviz.cnn.io/index/fearandgreed/current';
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          next: { revalidate: 3600 },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          result = {
+            value: Math.round(json.score || json.value || 50),
+            label: json.rating || classifyFearGreed(json.score || json.value || 50),
+            previousClose: Math.round(json.previous_close || json.score || 50),
+            oneWeekAgo: Math.round(json.previous_1_week || 50),
+            oneMonthAgo: Math.round(json.previous_1_month || 50),
+            timestamp: new Date().toISOString(),
+          };
+        }
+      } catch { /* give up */ }
+    }
+
+    return result;
+  });
+
+  fgCache = { data, ts: Date.now() };
+  return data;
 }
 
 /** Compact text block for AI prompts */
@@ -408,19 +423,20 @@ async function fetchCoinGeckoGlobal(): Promise<{ marketCap: number | null; btcDo
 export async function fetchCoinGeckoData(): Promise<CoinGeckoData> {
   if (cgCache && Date.now() - cgCache.ts < CG_CACHE_TTL) return cgCache.data;
 
-  const [topCoins, trending, global] = await Promise.all([
-    fetchCoinGeckoMarkets(),
-    fetchCoinGeckoTrending(),
-    fetchCoinGeckoGlobal(),
-  ]);
-
-  const data: CoinGeckoData = {
-    topCoins,
-    trending,
-    globalMarketCap: global.marketCap,
-    btcDominance: global.btcDominance,
-    available: topCoins.length > 0,
-  };
+  const data = await cached<CoinGeckoData>('coingecko', TTL_CRYPTO, async () => {
+    const [topCoins, trending, global] = await Promise.all([
+      fetchCoinGeckoMarkets(),
+      fetchCoinGeckoTrending(),
+      fetchCoinGeckoGlobal(),
+    ]);
+    return {
+      topCoins,
+      trending,
+      globalMarketCap: global.marketCap,
+      btcDominance: global.btcDominance,
+      available: topCoins.length > 0,
+    };
+  });
 
   cgCache = { data, ts: Date.now() };
   return data;
@@ -498,24 +514,19 @@ async function fetchBlsSeries(seriesIds: string[]): Promise<Record<string, numbe
 export async function fetchBlsData(): Promise<BlsData> {
   if (blsCache && Date.now() - blsCache.ts < BLS_CACHE_TTL) return blsCache.data;
 
-  // BLS Series IDs:
-  // CUSR0000SA0 = CPI All Items (Urban)
-  // WPUFD49104 = PPI All Commodities
-  // CES0000000001 = Total Nonfarm Payrolls (thousands)
-  // LNS14000000 = Unemployment Rate
-  // CES0500000003 = Average Hourly Earnings
-  const seriesIds = ['CUSR0000SA0', 'WPUFD49104', 'CES0000000001', 'LNS14000000', 'CES0500000003'];
-  const vals = await fetchBlsSeries(seriesIds);
-
-  const data: BlsData = {
-    cpiAllItems: vals['CUSR0000SA0'],
-    cpiYoY: null, // calculated from multiple periods, skip for now
-    ppiAllCommodities: vals['WPUFD49104'],
-    nonfarmPayrolls: vals['CES0000000001'],
-    unemploymentRate: vals['LNS14000000'],
-    averageHourlyEarnings: vals['CES0500000003'],
-    available: Object.values(vals).some(v => v !== null),
-  };
+  const data = await cached<BlsData>('bls', TTL_GOVERNMENT, async () => {
+    const seriesIds = ['CUSR0000SA0', 'WPUFD49104', 'CES0000000001', 'LNS14000000', 'CES0500000003'];
+    const vals = await fetchBlsSeries(seriesIds);
+    return {
+      cpiAllItems: vals['CUSR0000SA0'],
+      cpiYoY: null,
+      ppiAllCommodities: vals['WPUFD49104'],
+      nonfarmPayrolls: vals['CES0000000001'],
+      unemploymentRate: vals['LNS14000000'],
+      averageHourlyEarnings: vals['CES0500000003'],
+      available: Object.values(vals).some(v => v !== null),
+    };
+  });
 
   blsCache = { data, ts: Date.now() };
   return data;
@@ -550,9 +561,7 @@ export interface CftcData {
 let cftcCache: { data: CftcData; ts: number } | null = null;
 const CFTC_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours (weekly report)
 
-export async function fetchCftcData(): Promise<CftcData> {
-  if (cftcCache && Date.now() - cftcCache.ts < CFTC_CACHE_TTL) return cftcCache.data;
-
+async function fetchCftcRaw(): Promise<CftcData> {
   const positions: CotPosition[] = [];
 
   try {
@@ -595,7 +604,12 @@ export async function fetchCftcData(): Promise<CftcData> {
     }
   } catch { /* silent */ }
 
-  const data: CftcData = { positions, available: positions.length > 0 };
+  return { positions, available: positions.length > 0 };
+}
+
+export async function fetchCftcData(): Promise<CftcData> {
+  if (cftcCache && Date.now() - cftcCache.ts < CFTC_CACHE_TTL) return cftcCache.data;
+  const data = await cached<CftcData>('cftc', TTL_WEEKLY, fetchCftcRaw);
   cftcCache = { data, ts: Date.now() };
   return data;
 }
@@ -622,9 +636,7 @@ export interface TreasuryData {
 let treasuryCache: { data: TreasuryData; ts: number } | null = null;
 const TREASURY_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
 
-export async function fetchTreasuryData(): Promise<TreasuryData> {
-  if (treasuryCache && Date.now() - treasuryCache.ts < TREASURY_CACHE_TTL) return treasuryCache.data;
-
+async function fetchTreasuryRaw(): Promise<TreasuryData> {
   let tgaBalance: number | null = null;
   let tgaDate: string | null = null;
   let debtToThePenny: number | null = null;
@@ -681,6 +693,12 @@ export async function fetchTreasuryData(): Promise<TreasuryData> {
     available: tgaBalance !== null || debtToThePenny !== null,
   };
 
+  return data;
+}
+
+export async function fetchTreasuryData(): Promise<TreasuryData> {
+  if (treasuryCache && Date.now() - treasuryCache.ts < TREASURY_CACHE_TTL) return treasuryCache.data;
+  const data = await cached<TreasuryData>('treasury', TTL_GOVERNMENT, fetchTreasuryRaw);
   treasuryCache = { data, ts: Date.now() };
   return data;
 }
@@ -715,9 +733,7 @@ export interface DefiLlamaData {
 let defiCache: { data: DefiLlamaData; ts: number } | null = null;
 const DEFI_CACHE_TTL = 15 * 60 * 1000; // 15 min
 
-export async function fetchDefiLlamaData(): Promise<DefiLlamaData> {
-  if (defiCache && Date.now() - defiCache.ts < DEFI_CACHE_TTL) return defiCache.data;
-
+async function fetchDefiLlamaRaw(): Promise<DefiLlamaData> {
   let totalTvl: number | null = null;
   let topProtocols: DefiLlamaProtocol[] = [];
   let chainTvl: { name: string; tvl: number }[] = [];
@@ -774,6 +790,12 @@ export async function fetchDefiLlamaData(): Promise<DefiLlamaData> {
     available: topProtocols.length > 0 || chainTvl.length > 0,
   };
 
+  return data;
+}
+
+export async function fetchDefiLlamaData(): Promise<DefiLlamaData> {
+  if (defiCache && Date.now() - defiCache.ts < DEFI_CACHE_TTL) return defiCache.data;
+  const data = await cached<DefiLlamaData>('defi-llama', TTL_DEFI, fetchDefiLlamaRaw);
   defiCache = { data, ts: Date.now() };
   return data;
 }
@@ -921,30 +943,32 @@ const TV_QUOTES_CACHE_TTL = 60_000; // 1 minute
 export async function fetchTVLiveQuotes(): Promise<TVLiveQuotes> {
   if (tvQuotesCache && Date.now() - tvQuotesCache.ts < TV_QUOTES_CACHE_TTL) return tvQuotesCache.data;
 
-  try {
-    const { fetchQuotes, getConnectionStatus, DEFAULT_SYMBOLS } = await import('@/lib/tradingviewWS');
-    const quotes = await fetchQuotes(DEFAULT_SYMBOLS, 3000);
-    const status = getConnectionStatus();
+  const data = await cached<TVLiveQuotes>('tv-quotes', TTL_QUOTES, async () => {
+    try {
+      const { fetchQuotes, getConnectionStatus, DEFAULT_SYMBOLS } = await import('@/lib/tradingviewWS');
+      const quotes = await fetchQuotes(DEFAULT_SYMBOLS, 3000);
+      const status = getConnectionStatus();
+      return {
+        quotes: quotes.map(q => ({
+          symbol: q.symbol,
+          price: q.price,
+          change: q.change,
+          changePercent: q.changePercent,
+          volume: q.volume,
+          high: q.high,
+          low: q.low,
+        })),
+        connected: status.connected,
+        authenticated: status.authenticated,
+        available: quotes.length > 0,
+      };
+    } catch {
+      return { quotes: [], connected: false, authenticated: false, available: false };
+    }
+  });
 
-    const data: TVLiveQuotes = {
-      quotes: quotes.map(q => ({
-        symbol: q.symbol,
-        price: q.price,
-        change: q.change,
-        changePercent: q.changePercent,
-        volume: q.volume,
-        high: q.high,
-        low: q.low,
-      })),
-      connected: status.connected,
-      authenticated: status.authenticated,
-      available: quotes.length > 0,
-    };
-    tvQuotesCache = { data, ts: Date.now() };
-    return data;
-  } catch {
-    return { quotes: [], connected: false, authenticated: false, available: false };
-  }
+  tvQuotesCache = { data, ts: Date.now() };
+  return data;
 }
 
 function tvQuotesToPromptBlock(quotes: TVLiveQuotes): string {

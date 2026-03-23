@@ -93,7 +93,7 @@ function getReadinessChecklist(): ReadinessItem[] {
     // Data
     { id: 'db-indexes', category: 'data', title: 'Database Indexes', description: 'Add indexes on user_id, platform, status, created_at in Supabase', status: 'todo', priority: 'high' },
     { id: 'db-transactions', category: 'data', title: 'Database Transactions', description: 'Redis distributed lock prevents concurrent cron double-posts', status: 'done', priority: 'high' },
-    { id: 'response-caching', category: 'data', title: 'Redis Response Caching', description: 'Cache enriched data (FRED, Finnhub, CoinGecko) — Redis client exists but unused', status: 'todo', priority: 'high' },
+    { id: 'response-caching', category: 'data', title: 'Redis Response Caching', description: 'All enriched data fetchers cached in Upstash Redis with per-source TTLs', status: 'done', priority: 'high' },
     { id: 'soft-deletes', category: 'data', title: 'Soft Deletes', description: 'Replace hard deletes with soft deletes (deleted_at column) for data recovery', status: 'todo', priority: 'medium' },
     { id: 'migrations', category: 'data', title: 'Schema Migrations', description: 'Version-controlled DB schema with migration files', status: 'todo', priority: 'medium' },
 
