@@ -173,44 +173,47 @@ export function Progress() {
 
   useEffect(() => { fetchHealth(); }, [fetchHealth]);
 
-  // Auto-archive: move completed items (status=done or successful execution) to archive
+  // Auto-archive: move items with status=done (from health API) to archive on data refresh
   useEffect(() => {
     if (!data) return;
     const checklist = data.readiness.checklist;
-    const currentArchiveIds = new Set(archive.map(a => a.id));
-    const toArchive: ArchivedItem[] = [];
 
-    for (const item of checklist) {
-      if (currentArchiveIds.has(item.id)) continue;
+    setArchive(prevArchive => {
+      const currentArchiveIds = new Set(prevArchive.map(a => a.id));
+      const toArchive: ArchivedItem[] = [];
 
-      const d = decisions[item.id];
-      const isComplete = item.status === 'done';
-      const isExecutedSuccess = d?.decision === 'approved' && d.execResult?.success && !d.execResult?.requiresDeploy;
-
-      if (isComplete || isExecutedSuccess) {
-        toArchive.push({
-          id: item.id,
-          title: item.title,
-          category: item.category,
-          priority: item.priority,
-          description: item.description,
-          summary: buildSummary(item, d?.execResult),
-          archivedAt: new Date().toISOString(),
-          execResult: d?.execResult,
-        });
+      for (const item of checklist) {
+        if (currentArchiveIds.has(item.id)) continue;
+        // Only auto-archive items the health API marks as done
+        if (item.status === 'done') {
+          toArchive.push({
+            id: item.id,
+            title: item.title,
+            category: item.category,
+            priority: item.priority,
+            description: item.description,
+            summary: `${item.title} — completed`,
+            archivedAt: new Date().toISOString(),
+          });
+        }
       }
-    }
 
-    if (toArchive.length > 0) {
-      const updated = [...archive, ...toArchive];
-      setArchive(updated);
+      if (toArchive.length === 0) return prevArchive;
+
+      const updated = [...prevArchive, ...toArchive];
       saveArchive(updated);
-      // Clean up decisions for archived items
-      const nextDecisions = { ...decisions };
-      toArchive.forEach(a => delete nextDecisions[a.id]);
-      setDecisions(nextDecisions);
-      saveDecisions(nextDecisions);
-    }
+
+      // Clean up decisions for newly archived items
+      setDecisions(prev => {
+        const next = { ...prev };
+        let changed = false;
+        toArchive.forEach(a => { if (next[a.id]) { delete next[a.id]; changed = true; } });
+        if (changed) saveDecisions(next);
+        return changed ? next : prev;
+      });
+
+      return updated;
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
@@ -231,36 +234,72 @@ export function Progress() {
     }
   };
 
+  // Helper: update a single decision entry using functional state update (avoids stale closures)
+  const updateDecision = (id: string, entry: DecisionEntry) => {
+    setDecisions(prev => {
+      const next = { ...prev, [id]: entry };
+      saveDecisions(next);
+      return next;
+    });
+  };
+
   const decide = async (id: string, decision: Decision) => {
-    const entry: DecisionEntry = { decision, decidedAt: new Date().toISOString() };
+    const now = new Date().toISOString();
 
     if (decision === 'approved') {
-      // Mark as executing
-      entry.executing = true;
-      const next = { ...decisions, [id]: entry };
-      setDecisions(next);
-      saveDecisions(next);
+      // Mark as executing immediately
+      updateDecision(id, { decision, decidedAt: now, executing: true });
       setExpandedItem(id);
 
       // Execute the task
       const result = await executeTask(id);
-      entry.executing = false;
-      entry.execResult = result || { success: false, message: 'No response' };
-      const updated = { ...decisions, [id]: entry };
-      setDecisions(updated);
-      saveDecisions(updated);
+      const execResult = result || { success: false, message: 'No response' };
+
+      // Update with result (functional update so concurrent approvals don't clobber each other)
+      updateDecision(id, { decision, decidedAt: now, executing: false, execResult });
+
+      // Auto-archive if successful and no deploy needed
+      if (execResult.success && !execResult.requiresDeploy && data) {
+        const item = data.readiness.checklist.find(i => i.id === id);
+        if (item) {
+          setArchive(prev => {
+            if (prev.some(a => a.id === id)) return prev;
+            const updated = [...prev, {
+              id: item.id,
+              title: item.title,
+              category: item.category,
+              priority: item.priority,
+              description: item.description,
+              summary: execResult.message || item.description,
+              archivedAt: new Date().toISOString(),
+              execResult,
+            }];
+            saveArchive(updated);
+            return updated;
+          });
+          // Remove from decisions after short delay so user sees the result briefly
+          setTimeout(() => {
+            setDecisions(prev => {
+              const next = { ...prev };
+              delete next[id];
+              saveDecisions(next);
+              return next;
+            });
+          }, 3000);
+        }
+      }
     } else {
-      const next = { ...decisions, [id]: entry };
-      setDecisions(next);
-      saveDecisions(next);
+      updateDecision(id, { decision, decidedAt: now });
     }
   };
 
   const undecide = (id: string) => {
-    const next = { ...decisions };
-    delete next[id];
-    setDecisions(next);
-    saveDecisions(next);
+    setDecisions(prev => {
+      const next = { ...prev };
+      delete next[id];
+      saveDecisions(next);
+      return next;
+    });
   };
 
   const batchDecide = async (decision: Decision) => {
@@ -269,24 +308,19 @@ export function Progress() {
     setBatchMode(false);
 
     if (decision === 'denied') {
-      const next = { ...decisions };
-      ids.forEach(id => {
-        next[id] = { decision, decidedAt: new Date().toISOString() };
+      setDecisions(prev => {
+        const next = { ...prev };
+        ids.forEach(id => {
+          next[id] = { decision, decidedAt: new Date().toISOString() };
+        });
+        saveDecisions(next);
+        return next;
       });
-      setDecisions(next);
-      saveDecisions(next);
       return;
     }
 
-    // Approve + execute sequentially
-    for (const id of ids) {
-      const entry: DecisionEntry = { decision: 'approved', decidedAt: new Date().toISOString(), executing: true };
-      setDecisions(prev => { const n = { ...prev, [id]: entry }; saveDecisions(n); return n; });
-      const result = await executeTask(id);
-      entry.executing = false;
-      entry.execResult = result || { success: false, message: 'No response' };
-      setDecisions(prev => { const n = { ...prev, [id]: entry }; saveDecisions(n); return n; });
-    }
+    // Approve + execute each task (concurrent — all fire at once)
+    await Promise.all(ids.map(id => decide(id, 'approved')));
   };
 
   const toggleBatchItem = (id: string) => {
