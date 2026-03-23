@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Activity, Pause, Play, Wifi, WifiOff, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BackButton } from './BackButton';
+import { formatUsd } from '@/lib/formatters';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -125,12 +126,6 @@ function formatTime(ts: number): string {
 
 function formatNumber(n: number, decimals: number): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-}
-
-function formatUsd(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toFixed(2)}`;
 }
 
 function formatQty(n: number): string {

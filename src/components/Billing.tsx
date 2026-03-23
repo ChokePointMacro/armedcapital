@@ -8,6 +8,7 @@ import {
   TrendingDown, Layers, Globe,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { formatUsd } from '@/lib/formatters';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -199,12 +200,6 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatUsd(val: number): string {
-  if (val >= 1) return `$${val.toFixed(2)}`;
-  if (val >= 0.01) return `$${val.toFixed(3)}`;
-  return `$${val.toFixed(4)}`;
-}
 
 function SpendBar({ spent, limit, label }: { spent: number; limit: number; label: string }) {
   const pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;

@@ -6,6 +6,7 @@ import {
   AlertTriangle, CheckCircle2, Zap, DollarSign, Activity,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { formatTime, relativeTime } from '@/lib/formatters';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,21 +46,6 @@ const TYPE_COLORS: Record<string, string> = {
   cron_trigger: 'text-yellow-400 bg-yellow-400/10',
   notification: 'text-gray-400 bg-gray-400/10',
 };
-
-function formatTime(ts: string): string {
-  const d = new Date(ts);
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function relativeTime(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 // ── Main Component ───────────────────────────────────────────────────────────
 

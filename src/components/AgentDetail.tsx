@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import Link from 'next/link';
+import { relativeTime } from '@/lib/formatters';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -180,20 +181,6 @@ function RiskBar({ score }: { score: number }) {
   );
 }
 
-// ── Relative time ────────────────────────────────────────────────────────────
-
-function relativeTime(dateStr: string | null): string {
-  if (!dateStr) return 'Never';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
 // ── Productivity Score Panel ─────────────────────────────────────────────────
 
 function ProductivityPanel({ productivity }: { productivity: ProductivityScore | null }) {
@@ -320,7 +307,7 @@ function ProductivityPanel({ productivity }: { productivity: ProductivityScore |
       <div className="mt-auto pt-3 border-t border-gray-800/50">
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-mono text-gray-600">Last Active</span>
-          <span className="text-[10px] font-mono text-gray-500">{relativeTime(productivity.lastActive)}</span>
+          <span className="text-[10px] font-mono text-gray-500">{productivity.lastActive ? relativeTime(productivity.lastActive) : 'Never'}</span>
         </div>
       </div>
     </div>
@@ -666,7 +653,7 @@ function CompletedQuadrant({ tasks, onViewReport }: { tasks: Task[]; onViewRepor
                   <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${STATUS_COLORS[task.status]}`}>
                     {task.status === 'completed' ? 'DONE' : task.status.toUpperCase()}
                   </span>
-                  <span className="text-[10px] font-mono text-gray-600">{relativeTime(task.completed_at)}</span>
+                  <span className="text-[10px] font-mono text-gray-600">{task.completed_at ? relativeTime(task.completed_at) : '—'}</span>
                   {expanded ? <ChevronDown size={12} className="text-gray-600 ml-auto" /> : <ChevronRight size={12} className="text-gray-600 ml-auto" />}
                 </div>
                 <div className="text-sm text-gray-300">{task.title}</div>

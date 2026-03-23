@@ -7,6 +7,7 @@ import {
   ChevronRight, Activity,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { relativeTime } from '@/lib/formatters';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,17 +59,6 @@ const DEVICE_COLORS: Record<string, string> = {
   bot: 'text-red-400 bg-red-400/10',
   unknown: 'text-gray-400 bg-gray-400/10',
 };
-
-function relativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 function isActive(lastSeen: string): boolean {
   return Date.now() - new Date(lastSeen).getTime() < 5 * 60 * 1000;

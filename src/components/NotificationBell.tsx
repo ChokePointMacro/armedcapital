@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import Link from 'next/link';
+import { relativeTime } from '@/lib/formatters';
 
 interface Notification {
   id: string;
@@ -32,16 +33,6 @@ const SEVERITY_BORDER: Record<string, string> = {
   error: 'border-l-red-400',
   success: 'border-l-green-400',
 };
-
-function relativeTime(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
-}
 
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
