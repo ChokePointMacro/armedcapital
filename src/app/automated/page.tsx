@@ -2,18 +2,10 @@
 
 import { Layout } from '@/components/Layout';
 import { AutomatedReports } from '@/components/AutomatedReports';
-import { useUser } from '@clerk/nextjs';
+import { useUserData } from '@/hooks/useUserData';
 
 export default function AutomatedReportsPage() {
-  const { user } = useUser();
-
-  const userData = user ? {
-    id: user.id,
-    username: user.username || user.primaryEmailAddress?.emailAddress || '',
-    displayName: user.fullName || user.firstName || '',
-    profileImage: user.imageUrl || '',
-    authMethod: 'clerk' as const,
-  } : null;
+  const userData = useUserData();
 
   return (
     <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>

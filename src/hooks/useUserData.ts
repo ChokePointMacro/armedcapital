@@ -1,23 +1,22 @@
 'use client';
 
-import { Layout } from '@/components/Layout';
-import { Markets } from '@/components/Markets';
 import { useUser } from '@clerk/nextjs';
+import type { UserData } from '@/types';
 
-export default function MarketsPage() {
+/**
+ * Shared hook that converts Clerk's user object into our UserData type.
+ * Replaces the identical 7-line boilerplate that was copy-pasted across 21+ pages.
+ */
+export function useUserData(): UserData | null {
   const { user } = useUser();
 
-  const userData = user ? {
+  if (!user) return null;
+
+  return {
     id: user.id,
     username: user.username || user.primaryEmailAddress?.emailAddress || '',
     displayName: user.fullName || user.firstName || '',
     profileImage: user.imageUrl || '',
     authMethod: 'clerk' as const,
-  } : null;
-
-  return (
-    <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>
-      <Markets user={userData} />
-    </Layout>
-  );
+  };
 }

@@ -72,9 +72,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const tokenRecord = await getPlatformToken(userId, 'x');
+    let tokenRecord = null;
+    try {
+      tokenRecord = await getPlatformToken(userId, 'x');
+    } catch (dbError) {
+      console.warn('getPlatformToken failed (DB may not be initialized):', dbError);
+      // Fall through to env var fallback
+      tokenRecord = null;
+    }
 
-    if (!tokenRecord) {
+    // Check if we have a token record or if env var credentials are available
+    const hasEnvOAuth1a = !!(
+      process.env.X_API_KEY &&
+      process.env.X_API_SECRET &&
+      process.env.X_ACCESS_TOKEN &&
+      process.env.X_ACCESS_SECRET
+    );
+
+    if (!tokenRecord && !hasEnvOAuth1a) {
       return NextResponse.json(
         {
           error: 'X account not connected — go to Settings to connect your X account',
@@ -86,8 +101,18 @@ export async function POST(request: NextRequest) {
     try {
       let client: TwitterApi;
 
-      // Check if using OAuth 1.0a env-var credentials
-      if (tokenRecord.access_token === 'oauth1a-env') {
+      // Prefer OAuth 2.0 DB token if available, otherwise fall back to OAuth 1.0a env vars
+      if (tokenRecord) {
+        const refreshed = await refreshXToken(tokenRecord);
+        if (!refreshed || !refreshed.accessToken) {
+          return NextResponse.json(
+            { error: 'Failed to authenticate - token is invalid' },
+            { status: 401 }
+          );
+        }
+        client = new TwitterApi(refreshed.accessToken);
+      } else {
+        // Fall back to OAuth 1.0a env var credentials
         const apiKey = process.env.X_API_KEY;
         const apiSecret = process.env.X_API_SECRET;
         const accToken = process.env.X_ACCESS_TOKEN;
@@ -104,15 +129,6 @@ export async function POST(request: NextRequest) {
           accessToken: accToken,
           accessSecret: accSecret,
         });
-      } else {
-        const refreshed = await refreshXToken(tokenRecord);
-        if (!refreshed || !refreshed.accessToken) {
-          return NextResponse.json(
-            { error: 'Failed to authenticate - token is invalid' },
-            { status: 401 }
-          );
-        }
-        client = new TwitterApi(refreshed.accessToken);
       }
 
       const result = await client.v2.tweet(text);

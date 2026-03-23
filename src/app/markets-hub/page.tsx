@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { Markets } from '@/components/Markets';
 import { TradeFlow } from '@/components/TradeFlow';
-import { useUser } from '@clerk/nextjs';
+import { useUserData } from '@/hooks/useUserData';
 import { TrendingUp, ArrowRightLeft } from 'lucide-react';
 
 const SUB_TABS = [
@@ -15,16 +15,8 @@ const SUB_TABS = [
 type SubTab = typeof SUB_TABS[number]['key'];
 
 export default function MarketsHubPage() {
-  const { user } = useUser();
+  const userData = useUserData();
   const [tab, setTab] = useState<SubTab>('markets');
-
-  const userData = user ? {
-    id: user.id,
-    username: user.username || user.primaryEmailAddress?.emailAddress || '',
-    displayName: user.fullName || user.firstName || '',
-    profileImage: user.imageUrl || '',
-    authMethod: 'clerk' as const,
-  } : null;
 
   return (
     <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>

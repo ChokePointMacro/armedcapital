@@ -5,7 +5,7 @@ import { Layout } from '@/components/Layout';
 import { Compose } from '@/components/Compose';
 import { Schedule } from '@/components/Schedule';
 import { Reports } from '@/components/Reports';
-import { useUser } from '@clerk/nextjs';
+import { useUserData } from '@/hooks/useUserData';
 import { PenLine, Clock, FileText } from 'lucide-react';
 
 const SUB_TABS = [
@@ -17,16 +17,8 @@ const SUB_TABS = [
 type SubTab = typeof SUB_TABS[number]['key'];
 
 export default function StudioPage() {
-  const { user } = useUser();
+  const userData = useUserData();
   const [tab, setTab] = useState<SubTab>('compose');
-
-  const userData = user ? {
-    id: user.id,
-    username: user.username || user.primaryEmailAddress?.emailAddress || '',
-    displayName: user.fullName || user.firstName || '',
-    profileImage: user.imageUrl || '',
-    authMethod: 'clerk' as const,
-  } : null;
 
   return (
     <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>

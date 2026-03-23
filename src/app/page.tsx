@@ -2,18 +2,10 @@
 
 import { Layout } from '@/components/Layout';
 import { Dashboard } from '@/components/Dashboard';
-import { useUser } from '@clerk/nextjs';
+import { useUserData } from '@/hooks/useUserData';
 
 export default function HomePage() {
-  const { user, isLoaded } = useUser();
-
-  const userData = user ? {
-    id: user.id,
-    username: user.username || user.primaryEmailAddress?.emailAddress || '',
-    displayName: user.fullName || user.firstName || '',
-    profileImage: user.imageUrl || '',
-    authMethod: 'clerk' as const,
-  } : null;
+  const userData = useUserData();
 
   return (
     <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>

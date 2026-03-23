@@ -5,7 +5,7 @@ import { Layout } from '@/components/Layout';
 import { Usage } from '@/components/Usage';
 import { Billing } from '@/components/Billing';
 import { AuditLog } from '@/components/AuditLog';
-import { useUser } from '@clerk/nextjs';
+import { useUserData } from '@/hooks/useUserData';
 import { BarChart3, DollarSign, FileText } from 'lucide-react';
 
 const SUB_TABS = [
@@ -17,16 +17,8 @@ const SUB_TABS = [
 type SubTab = typeof SUB_TABS[number]['key'];
 
 export default function OperationsPage() {
-  const { user } = useUser();
+  const userData = useUserData();
   const [tab, setTab] = useState<SubTab>('usage');
-
-  const userData = user ? {
-    id: user.id,
-    username: user.username || user.primaryEmailAddress?.emailAddress || '',
-    displayName: user.fullName || user.firstName || '',
-    profileImage: user.imageUrl || '',
-    authMethod: 'clerk' as const,
-  } : null;
 
   return (
     <Layout user={userData} onLogout={() => {}} onLogin={() => {}}>
