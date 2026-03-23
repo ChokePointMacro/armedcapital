@@ -42,7 +42,23 @@ interface HealthData {
 }
 
 type Decision = 'approved' | 'denied';
-type DecisionMap = Record<string, { decision: Decision; decidedAt: string }>;
+
+interface ExecResult {
+  success: boolean;
+  message: string;
+  details?: string;
+  requiresDeploy?: boolean;
+  executedAt?: string;
+}
+
+interface DecisionEntry {
+  decision: Decision;
+  decidedAt: string;
+  execResult?: ExecResult;
+  executing?: boolean;
+}
+
+type DecisionMap = Record<string, DecisionEntry>;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -124,10 +140,46 @@ export function Progress() {
 
   useEffect(() => { fetchHealth(); }, [fetchHealth]);
 
-  const decide = (id: string, decision: Decision) => {
-    const next = { ...decisions, [id]: { decision, decidedAt: new Date().toISOString() } };
-    setDecisions(next);
-    saveDecisions(next);
+  // Execute a task via the API
+  const executeTask = async (id: string): Promise<ExecResult | null> => {
+    try {
+      const res = await apiFetch('/api/admin/progress/execute', {
+        method: 'POST',
+        body: JSON.stringify({ taskId: id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        return { success: false, message: err.error || 'Execution failed' };
+      }
+      return await res.json();
+    } catch (err) {
+      return { success: false, message: err instanceof Error ? err.message : 'Network error' };
+    }
+  };
+
+  const decide = async (id: string, decision: Decision) => {
+    const entry: DecisionEntry = { decision, decidedAt: new Date().toISOString() };
+
+    if (decision === 'approved') {
+      // Mark as executing
+      entry.executing = true;
+      const next = { ...decisions, [id]: entry };
+      setDecisions(next);
+      saveDecisions(next);
+      setExpandedItem(id);
+
+      // Execute the task
+      const result = await executeTask(id);
+      entry.executing = false;
+      entry.execResult = result || { success: false, message: 'No response' };
+      const updated = { ...decisions, [id]: entry };
+      setDecisions(updated);
+      saveDecisions(updated);
+    } else {
+      const next = { ...decisions, [id]: entry };
+      setDecisions(next);
+      saveDecisions(next);
+    }
   };
 
   const undecide = (id: string) => {
@@ -137,15 +189,30 @@ export function Progress() {
     saveDecisions(next);
   };
 
-  const batchDecide = (decision: Decision) => {
-    const next = { ...decisions };
-    batchSelected.forEach(id => {
-      next[id] = { decision, decidedAt: new Date().toISOString() };
-    });
-    setDecisions(next);
-    saveDecisions(next);
+  const batchDecide = async (decision: Decision) => {
+    const ids = Array.from(batchSelected);
     setBatchSelected(new Set());
     setBatchMode(false);
+
+    if (decision === 'denied') {
+      const next = { ...decisions };
+      ids.forEach(id => {
+        next[id] = { decision, decidedAt: new Date().toISOString() };
+      });
+      setDecisions(next);
+      saveDecisions(next);
+      return;
+    }
+
+    // Approve + execute sequentially
+    for (const id of ids) {
+      const entry: DecisionEntry = { decision: 'approved', decidedAt: new Date().toISOString(), executing: true };
+      setDecisions(prev => { const n = { ...prev, [id]: entry }; saveDecisions(n); return n; });
+      const result = await executeTask(id);
+      entry.executing = false;
+      entry.execResult = result || { success: false, message: 'No response' };
+      setDecisions(prev => { const n = { ...prev, [id]: entry }; saveDecisions(n); return n; });
+    }
   };
 
   const toggleBatchItem = (id: string) => {
@@ -156,14 +223,14 @@ export function Progress() {
     });
   };
 
-  const approveAllCritical = () => {
+  const approveAllCritical = async () => {
     if (!data) return;
-    const next = { ...decisions };
-    data.readiness.checklist
-      .filter(i => i.priority === 'critical' && i.status !== 'done')
-      .forEach(i => { next[i.id] = { decision: 'approved', decidedAt: new Date().toISOString() }; });
-    setDecisions(next);
-    saveDecisions(next);
+    const criticalItems = data.readiness.checklist
+      .filter(i => i.priority === 'critical' && i.status !== 'done');
+
+    for (const item of criticalItems) {
+      await decide(item.id, 'approved');
+    }
   };
 
   const toggleCat = (cat: string) => {
@@ -431,21 +498,27 @@ export function Progress() {
                       const isDone = item.status === 'done';
                       const isApproved = d?.decision === 'approved';
                       const isDenied = d?.decision === 'denied';
+                      const isExecuting = d?.executing === true;
+                      const hasResult = !!d?.execResult;
                       const isOpen = expandedItem === item.id;
 
                       let rowBg = 'bg-gray-700/20';
                       if (isDone) rowBg = 'bg-green-500/5';
+                      else if (isExecuting) rowBg = 'bg-btc-orange/10';
+                      else if (isApproved && hasResult) rowBg = d.execResult?.success ? 'bg-green-500/10' : 'bg-red-500/10';
                       else if (isApproved) rowBg = 'bg-green-500/10';
                       else if (isDenied) rowBg = 'bg-red-500/5';
                       else if (item.priority === 'critical') rowBg = 'bg-red-500/5';
 
                       const st = isDone
                         ? STATUS_STYLES.done
-                        : isApproved
-                          ? { icon: <ThumbsUp size={14} />, bg: '', text: 'text-green-400' }
-                          : isDenied
-                            ? { icon: <ThumbsDown size={14} />, bg: '', text: 'text-red-400' }
-                            : STATUS_STYLES[item.status] || STATUS_STYLES.todo;
+                        : isExecuting
+                          ? { icon: <Loader2 size={14} className="animate-spin" />, bg: '', text: 'text-btc-orange' }
+                          : isApproved
+                            ? { icon: <CheckCircle2 size={14} />, bg: '', text: 'text-green-400' }
+                            : isDenied
+                              ? { icon: <ThumbsDown size={14} />, bg: '', text: 'text-red-400' }
+                              : STATUS_STYLES[item.status] || STATUS_STYLES.todo;
 
                       return (
                         <div key={item.id} className={`border-b border-gray-800/50 last:border-0 ${rowBg}`}>
@@ -483,7 +556,21 @@ export function Progress() {
                                 <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${PRIORITY_BADGE[item.priority]}`}>
                                   {item.priority}
                                 </span>
-                                {isApproved && (
+                                {isExecuting && (
+                                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-btc-orange/20 text-btc-orange border border-btc-orange/30 animate-pulse">
+                                    EXECUTING…
+                                  </span>
+                                )}
+                                {isApproved && !isExecuting && hasResult && (
+                                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+                                    d.execResult?.success
+                                      ? 'bg-green-500/20 text-green-300 border-green-500/30'
+                                      : 'bg-red-500/20 text-red-300 border-red-500/30'
+                                  }`}>
+                                    {d.execResult?.success ? 'EXECUTED' : 'FAILED'}
+                                  </span>
+                                )}
+                                {isApproved && !isExecuting && !hasResult && (
                                   <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-green-500/20 text-green-300 border border-green-500/30">
                                     APPROVED
                                   </span>
@@ -542,6 +629,48 @@ export function Progress() {
                             <div className="px-4 pb-4 pt-1 ml-8 border-l-2 border-gray-800 space-y-3">
                               <p className="text-xs text-gray-400">{item.description}</p>
 
+                              {/* Execution result */}
+                              {hasResult && d.execResult && (
+                                <div className={`rounded-lg border p-3 ${
+                                  d.execResult.success
+                                    ? 'bg-green-500/5 border-green-500/20'
+                                    : 'bg-red-500/5 border-red-500/20'
+                                }`}>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    {d.execResult.success
+                                      ? <CheckCircle2 size={12} className="text-green-400" />
+                                      : <AlertTriangle size={12} className="text-red-400" />
+                                    }
+                                    <span className={`text-xs font-mono ${d.execResult.success ? 'text-green-300' : 'text-red-300'}`}>
+                                      {d.execResult.message}
+                                    </span>
+                                    {d.execResult.requiresDeploy && (
+                                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                                        NEEDS DEPLOY
+                                      </span>
+                                    )}
+                                  </div>
+                                  {d.execResult.details && (
+                                    <pre className="text-[10px] text-gray-400 mt-2 whitespace-pre-wrap font-mono bg-black/20 rounded p-2 max-h-40 overflow-y-auto">
+                                      {d.execResult.details}
+                                    </pre>
+                                  )}
+                                  {d.execResult.executedAt && (
+                                    <p className="text-[9px] text-gray-600 mt-1">
+                                      Executed: {new Date(d.execResult.executedAt).toLocaleString()}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Executing spinner */}
+                              {isExecuting && (
+                                <div className="flex items-center gap-2 py-2">
+                                  <Loader2 size={14} className="animate-spin text-btc-orange" />
+                                  <span className="text-xs text-btc-orange">Executing task…</span>
+                                </div>
+                              )}
+
                               <div className="flex items-center gap-2 text-[10px] text-gray-600">
                                 <span>Category: <span className={CATEGORY_META[item.category]?.color}>{item.category}</span></span>
                                 <span>·</span>
@@ -555,17 +684,25 @@ export function Progress() {
                               </div>
 
                               {/* Action buttons */}
-                              {!isDone && (
+                              {!isDone && !isExecuting && (
                                 <div className="flex gap-2 pt-1">
                                   {!isApproved && (
                                     <button
                                       onClick={() => decide(item.id, 'approved')}
                                       className="flex items-center gap-1.5 text-[10px] font-mono px-4 py-2 rounded bg-green-500/10 border border-green-500/30 text-green-300 hover:bg-green-500/20 transition-colors"
                                     >
-                                      <ThumbsUp size={11} /> Approve — Add to Roadmap
+                                      <Play size={11} /> Approve &amp; Execute
                                     </button>
                                   )}
-                                  {!isDenied && (
+                                  {isApproved && hasResult && (
+                                    <button
+                                      onClick={() => decide(item.id, 'approved')}
+                                      className="flex items-center gap-1.5 text-[10px] font-mono px-4 py-2 rounded bg-btc-orange/10 border border-btc-orange/30 text-btc-orange hover:bg-btc-orange/20 transition-colors"
+                                    >
+                                      <RefreshCw size={11} /> Re-Execute
+                                    </button>
+                                  )}
+                                  {!isDenied && !isApproved && (
                                     <button
                                       onClick={() => decide(item.id, 'denied')}
                                       className="flex items-center gap-1.5 text-[10px] font-mono px-4 py-2 rounded bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors"
@@ -578,7 +715,7 @@ export function Progress() {
                                       onClick={() => undecide(item.id)}
                                       className="flex items-center gap-1.5 text-[10px] font-mono px-4 py-2 rounded bg-gray-800 border border-gray-700 text-gray-400 hover:text-gray-300 transition-colors"
                                     >
-                                      <X size={11} /> Undo Decision
+                                      <X size={11} /> Reset
                                     </button>
                                   )}
                                 </div>
