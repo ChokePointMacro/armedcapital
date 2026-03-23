@@ -1,27 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { safeAuth } from '@/lib/authHelper';
 import { saveReport } from '@/lib/db';
 import {
   generateWeeklyReport,
   generateForecastReport,
   generateSpeculationReport,
 } from '@/services/geminiService';
+import { apiGuard } from '@/lib/apiGuard';
+import { validate, REPORT_SCHEMA } from '@/lib/validate';
 
 const REPORT_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = await safeAuth();
+    // Auth + rate limit (10 req/min — AI generation is expensive)
+    const guard = await apiGuard(request, { requireAuth: true, tier: 'report' });
+    if (guard instanceof NextResponse) return guard;
+    const { userId } = guard;
 
-    const { type, customTopic } = await request.json();
+    const body = await request.json();
+    const { data, error: validationError } = validate(body, REPORT_SCHEMA);
+    if (validationError) return validationError;
 
-    const validTypes = ['global', 'crypto', 'equities', 'nasdaq', 'conspiracies', 'custom', 'forecast', 'china', 'speculation'];
-    if (!type || !validTypes.includes(type)) {
-      return NextResponse.json(
-        { error: 'Invalid report type' },
-        { status: 400 }
-      );
-    }
+    const { type, customTopic } = data as { type: string; customTopic?: string };
 
     if (type === 'custom' && !customTopic?.trim()) {
       return NextResponse.json(

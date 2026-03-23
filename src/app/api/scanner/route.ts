@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
-import Anthropic from '@anthropic-ai/sdk';
+// Anthropic SDK is dynamically imported in runAIScan() to reduce cold-start bundle size
 import {
   fetchAllEnrichedData, enrichedDataToPromptBlock,
 } from '@/lib/enrichedData';
@@ -528,6 +528,7 @@ async function runAIScan(
   fearGreed: FearGreedData | null,
   coinGecko: CoinGeckoData,
 ): Promise<ScanResult> {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   // Build market snapshot from Public.com data

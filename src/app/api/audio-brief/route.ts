@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
 import { createServerSupabase } from '@/lib/supabase';
-import OpenAI from 'openai';
+// OpenAI SDK is dynamically imported below to reduce cold-start bundle size
 
 export async function POST(request: NextRequest) {
   const userId = await safeAuth();
@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     const headlineIntros = (report.headlines || []).slice(0, 5).map((h: any, i: number) => `Story ${i + 1}: ${h.title}.`).join(' ');
     const text = `Today's Intelligence Brief. ${report.analysis?.overallSummary || ''} Here are the top stories. ${headlineIntros}`.substring(0, 4096);
 
+    const { default: OpenAI } = await import('openai');
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
     const mp3Response = await openai.audio.speech.create({ model: 'tts-1', voice: 'onyx', input: text });
     const buffer = Buffer.from(await mp3Response.arrayBuffer());

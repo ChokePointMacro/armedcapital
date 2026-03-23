@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { safeAuth } from '@/lib/authHelper';
 import { getScheduledPosts, createScheduledPost, deleteScheduledPost } from '@/lib/db';
+import { apiGuard } from '@/lib/apiGuard';
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = await safeAuth();
+    const guard = await apiGuard(request, { requireAuth: true, tier: 'api' });
+    if (guard instanceof NextResponse) return guard;
+    const { userId } = guard;
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const posts = await getScheduledPosts(userId);
+    const posts = await getScheduledPosts(userId!);
     return NextResponse.json(posts);
   } catch (error) {
     console.error('[API] Error in GET /api/scheduled-posts:', error);
@@ -26,14 +21,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = await safeAuth();
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
+    const guard = await apiGuard(request, { requireAuth: true, tier: 'api' });
+    if (guard instanceof NextResponse) return guard;
+    const { userId } = guard;
 
     const { content, scheduledAt } = await request.json();
 
@@ -52,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     const post = await createScheduledPost({
-      user_id: userId,
+      user_id: userId!,
       content,
       scheduled_at: scheduledAt,
     });

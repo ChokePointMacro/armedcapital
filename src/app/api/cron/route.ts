@@ -14,6 +14,7 @@ import {
 } from '@/services/geminiService';
 import nodemailer from 'nodemailer';
 import { postTweet } from '@/lib/xClient';
+import { redis } from '@/lib/redis';
 
 function escapeHtml(str: string): string {
   return str
@@ -26,9 +27,19 @@ function escapeHtml(str: string): string {
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify the cron secret
+    // CRON_SECRET is mandatory — reject all requests if unset
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret) {
+      console.error('[Cron] CRON_SECRET env var is not set — rejecting request');
+      return NextResponse.json(
+        { error: 'Server misconfiguration: cron secret not set' },
+        { status: 500 }
+      );
+    }
+
     const authHeader = request.headers.get('authorization');
-    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    if (authHeader !== `Bearer ${cronSecret}`) {
+      console.warn('[Cron] Unauthorized cron attempt from', request.headers.get('x-forwarded-for'));
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -42,8 +53,16 @@ export async function GET(request: NextRequest) {
       errors: [],
     };
 
-    // Process scheduled social posts — actually post to X
+    // Acquire distributed lock to prevent concurrent cron runs
+    const lockKey = 'cron:lock';
+    const lockAcquired = await redis.set(lockKey, Date.now().toString(), { nx: true, ex: 120 });
+    if (!lockAcquired) {
+      return NextResponse.json({ ok: true, skipped: true, reason: 'Another cron run is in progress' });
+    }
+
     try {
+      // Process scheduled social posts — actually post to X
+      try {
       const pending = await getPendingScheduledPosts();
 
       // Only post if scheduled_at is in the past (or within 5 min window)
@@ -247,8 +266,14 @@ export async function GET(request: NextRequest) {
       ok: true,
       ...results,
     });
+    } finally {
+      // Always release the distributed lock
+      await redis.del(lockKey).catch(() => {});
+    }
   } catch (error) {
     console.error('[Cron] Error:', error);
+    // Release lock on error too
+    await redis.del('cron:lock').catch(() => {});
     return NextResponse.json(
       {
         ok: false,

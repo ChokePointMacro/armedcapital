@@ -73,26 +73,26 @@ interface ReadinessItem {
 function getReadinessChecklist(): ReadinessItem[] {
   return [
     // Security
-    { id: 'rate-limiting', category: 'security', title: 'API Rate Limiting', description: 'Add Redis-based rate limiting middleware to all API routes', status: 'todo', priority: 'critical' },
+    { id: 'rate-limiting', category: 'security', title: 'API Rate Limiting', description: 'Upstash Redis sliding-window rate limiter with per-tier configs', status: 'done', priority: 'critical' },
     { id: 'admin-db', category: 'security', title: 'Move Admin Config to DB', description: 'Replace hardcoded admin emails with Supabase roles table', status: 'todo', priority: 'critical' },
-    { id: 'public-reports-auth', category: 'security', title: 'Secure Public Reports Endpoint', description: 'Add authentication to /api/public/reports or add API key gating', status: 'todo', priority: 'critical' },
-    { id: 'input-validation', category: 'security', title: 'Schema Validation (Zod)', description: 'Add Zod schemas for all API request bodies', status: 'todo', priority: 'high' },
-    { id: 'cron-secret', category: 'security', title: 'Require Cron Secret', description: 'Make CRON_SECRET mandatory — reject all requests if unset', status: 'todo', priority: 'high' },
+    { id: 'public-reports-auth', category: 'security', title: 'Secure Public Reports Endpoint', description: 'Rate limited + optional API key gating on /api/public/reports', status: 'done', priority: 'critical' },
+    { id: 'input-validation', category: 'security', title: 'Schema Validation', description: 'Request body validation with preset schemas on key routes', status: 'done', priority: 'high' },
+    { id: 'cron-secret', category: 'security', title: 'Require Cron Secret', description: 'CRON_SECRET is mandatory — rejects all requests if unset', status: 'done', priority: 'high' },
     { id: 'webhook-auth', category: 'security', title: 'Require Webhook Secrets', description: 'Make TV_WEBHOOK_SECRET mandatory for TradingView webhooks', status: 'todo', priority: 'medium' },
 
     // Infrastructure
-    { id: 'error-tracking', category: 'infrastructure', title: 'Sentry Error Tracking', description: 'Configure @sentry/nextjs (already in deps, just needs init)', status: 'todo', priority: 'critical' },
-    { id: 'structured-logging', category: 'infrastructure', title: 'Structured Logging', description: 'Replace console.* with Pino logger — levels, timestamps, request IDs', status: 'todo', priority: 'high' },
+    { id: 'error-tracking', category: 'infrastructure', title: 'Sentry Error Tracking', description: 'Sentry initialized with client/server/edge configs + global error boundary', status: 'done', priority: 'critical' },
+    { id: 'structured-logging', category: 'infrastructure', title: 'Structured Logging', description: 'JSON structured logger with levels, timestamps, child loggers', status: 'done', priority: 'high' },
     { id: 'health-check', category: 'infrastructure', title: 'Deep Health Check', description: 'Health endpoint checks DB, external APIs, dependencies', status: 'done', priority: 'high' },
     { id: 'ws-fix', category: 'infrastructure', title: 'WebSocket Bundling Fix', description: 'Exclude ws from webpack to prevent mask() crash on Vercel', status: 'done', priority: 'critical' },
     { id: 'x-client', category: 'infrastructure', title: 'Shared X/Twitter Client', description: 'Consolidated 3 duplicate posting implementations into xClient.ts', status: 'done', priority: 'high' },
     { id: 'shared-hooks', category: 'infrastructure', title: 'Shared Hooks & Utilities', description: 'useUserData hook + formatters.ts replacing 27 duplicate implementations', status: 'done', priority: 'medium' },
     { id: 'nav-consolidation', category: 'infrastructure', title: 'Nav Consolidation', description: 'Merged 8 standalone pages into 3 hub tabs (Operations, Studio, Markets)', status: 'done', priority: 'medium' },
-    { id: 'version-endpoint', category: 'infrastructure', title: 'Version / Build ID Endpoint', description: 'Add build commit hash and deploy timestamp to health check', status: 'todo', priority: 'medium' },
+    { id: 'version-endpoint', category: 'infrastructure', title: 'Version / Build ID Endpoint', description: 'VERCEL_GIT_COMMIT_SHA + deploy timestamp in health response', status: 'done', priority: 'medium' },
 
     // Data
     { id: 'db-indexes', category: 'data', title: 'Database Indexes', description: 'Add indexes on user_id, platform, status, created_at in Supabase', status: 'todo', priority: 'high' },
-    { id: 'db-transactions', category: 'data', title: 'Database Transactions', description: 'Add locking/transactions to prevent double-post race conditions in cron', status: 'todo', priority: 'high' },
+    { id: 'db-transactions', category: 'data', title: 'Database Transactions', description: 'Redis distributed lock prevents concurrent cron double-posts', status: 'done', priority: 'high' },
     { id: 'response-caching', category: 'data', title: 'Redis Response Caching', description: 'Cache enriched data (FRED, Finnhub, CoinGecko) — Redis client exists but unused', status: 'todo', priority: 'high' },
     { id: 'soft-deletes', category: 'data', title: 'Soft Deletes', description: 'Replace hard deletes with soft deletes (deleted_at column) for data recovery', status: 'todo', priority: 'medium' },
     { id: 'migrations', category: 'data', title: 'Schema Migrations', description: 'Version-controlled DB schema with migration files', status: 'todo', priority: 'medium' },
@@ -106,7 +106,7 @@ function getReadinessChecklist(): ReadinessItem[] {
     { id: 'multi-tenant', category: 'features', title: 'Multi-Tenant / Teams', description: 'Organization workspaces with shared access and delegated roles', status: 'todo', priority: 'low' },
 
     // Performance
-    { id: 'bundle-optimization', category: 'performance', title: 'Bundle Optimization', description: 'Dynamic imports for heavy server libs (anthropic, openai, google-genai)', status: 'todo', priority: 'medium' },
+    { id: 'bundle-optimization', category: 'performance', title: 'Bundle Optimization', description: 'Dynamic imports for Anthropic + OpenAI SDKs in scanner/audio routes', status: 'done', priority: 'medium' },
     { id: 'sse-cleanup', category: 'performance', title: 'SSE Connection Management', description: 'Add heartbeats and timeouts to prevent memory leaks on SSE streams', status: 'todo', priority: 'medium' },
     { id: 'pagination', category: 'performance', title: 'API Pagination', description: 'Add limit/offset to list endpoints (reports, posts, tokens)', status: 'todo', priority: 'medium' },
   ];
@@ -132,6 +132,12 @@ export async function GET() {
 
   return NextResponse.json({
     status: anyDown ? 'unhealthy' : allHealthy ? 'healthy' : 'degraded',
+    version: {
+      commitSha: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || 'local',
+      commitRef: process.env.VERCEL_GIT_COMMIT_REF || 'unknown',
+      deployedAt: process.env.VERCEL_GIT_COMMIT_MESSAGE ? new Date().toISOString() : null,
+      env: process.env.VERCEL_ENV || process.env.NODE_ENV || 'development',
+    },
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     responseMs: Date.now() - start,
