@@ -5,13 +5,15 @@ import { Layout } from '@/components/Layout';
 import { Usage } from '@/components/Usage';
 import { Billing } from '@/components/Billing';
 import { AuditLog } from '@/components/AuditLog';
+import { Progress } from '@/components/Progress';
 import { useUserData } from '@/hooks/useUserData';
-import { BarChart3, DollarSign, FileText } from 'lucide-react';
+import { BarChart3, DollarSign, FileText, Activity } from 'lucide-react';
 
 const SUB_TABS = [
   { key: 'usage', label: 'Usage', icon: <BarChart3 size={12} /> },
   { key: 'billing', label: 'Billing', icon: <DollarSign size={12} /> },
   { key: 'audit', label: 'Audit', icon: <FileText size={12} /> },
+  { key: 'progress', label: 'Progress', icon: <Activity size={12} /> },
 ] as const;
 
 type SubTab = typeof SUB_TABS[number]['key'];
@@ -42,6 +44,7 @@ export default function OperationsPage() {
       {tab === 'usage' && <Usage user={userData} />}
       {tab === 'billing' && <Billing />}
       {tab === 'audit' && <AuditLog />}
+      {tab === 'progress' && <Progress />}
     </Layout>
   );
 }
