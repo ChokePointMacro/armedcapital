@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
 import { getPlatformToken } from '@/lib/db';
-import { TwitterApi } from 'twitter-api-v2';
+import { postTweet } from '@/lib/xClient';
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,29 +103,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Post to X via OAuth 1.0a
+    // Post to X via shared xClient (OAuth 1.0a with timeout + retry)
     if (platforms.includes('x')) {
-      try {
-        const apiKey = process.env.X_API_KEY;
-        const apiSecret = process.env.X_API_SECRET;
-        const accToken = process.env.X_ACCESS_TOKEN;
-        const accSecret = process.env.X_ACCESS_SECRET;
-
-        if (!apiKey || !apiSecret || !accToken || !accSecret) {
-          throw new Error('X OAuth 1.0a credentials not configured');
-        }
-
-        const client = new TwitterApi({
-          appKey: apiKey,
-          appSecret: apiSecret,
-          accessToken: accToken,
-          accessSecret: accSecret,
-        });
-
-        const result = await client.v2.tweet(text.substring(0, 280));
-        results.x = { success: true, id: result.data.id };
-      } catch (err) {
-        results.x = { success: false, error: err instanceof Error ? err.message : String(err) };
+      const xResult = await postTweet(text.substring(0, 280));
+      if (xResult.success) {
+        results.x = { success: true, id: xResult.tweetId };
+      } else {
+        results.x = { success: false, error: xResult.error };
       }
     }
 

@@ -1,177 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
 import { getPlatformToken } from '@/lib/db';
-import { TwitterApi } from 'twitter-api-v2';
-
-async function refreshXToken(tokenRecord: any): Promise<any | null> {
-  if (!tokenRecord.refresh_token) {
-    return { accessToken: tokenRecord.access_token };
-  }
-
-  try {
-    const clientId = process.env.X_CLIENT_ID;
-    const clientSecret = process.env.X_CLIENT_SECRET;
-
-    if (!clientId || !clientSecret) {
-      console.error('X OAuth credentials not configured');
-      return null;
-    }
-
-    const res = await fetch('https://token.twitter.com/2/oauth2/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: tokenRecord.refresh_token,
-        client_id: clientId,
-        client_secret: clientSecret,
-      }).toString(),
-    });
-
-    if (!res.ok) {
-      console.error('Failed to refresh X token:', await res.text());
-      return null;
-    }
-
-    const data = await res.json() as any;
-    return {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      expiresAt: Date.now() + (data.expires_in || 7200) * 1000,
-    };
-  } catch (error) {
-    console.error('Error refreshing X token:', error);
-    return null;
-  }
-}
+import { postTweet, postTweetWithToken, hasOAuth1aEnvVars } from '@/lib/xClient';
 
 export async function POST(request: NextRequest) {
   try {
     const userId = await safeAuth();
-
     if (!userId) {
-      return NextResponse.json(
-        { error: 'Not authenticated' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
     const { text } = await request.json();
 
-    if (!text?.trim()) {
-      return NextResponse.json(
-        { error: 'Cannot post empty content' },
-        { status: 400 }
-      );
-    }
-
-    if (text.length > 280) {
-      return NextResponse.json(
-        { error: `Post too long: ${text.length}/280 characters` },
-        { status: 400 }
-      );
-    }
-
+    // Try DB token first, fall back to env var OAuth 1.0a
     let tokenRecord = null;
     try {
       tokenRecord = await getPlatformToken(userId, 'x');
-    } catch (dbError) {
-      console.warn('getPlatformToken failed (DB may not be initialized):', dbError);
-      // Fall through to env var fallback
-      tokenRecord = null;
+    } catch {
+      // DB may not be initialized — fall through to env var
     }
 
-    // Check if we have a token record or if env var credentials are available
-    const hasEnvOAuth1a = !!(
-      process.env.X_API_KEY &&
-      process.env.X_API_SECRET &&
-      process.env.X_ACCESS_TOKEN &&
-      process.env.X_ACCESS_SECRET
-    );
-
-    if (!tokenRecord && !hasEnvOAuth1a) {
+    let result;
+    if (tokenRecord) {
+      result = await postTweetWithToken(text, tokenRecord);
+    } else if (hasOAuth1aEnvVars()) {
+      result = await postTweet(text);
+    } else {
       return NextResponse.json(
-        {
-          error: 'X account not connected — go to Settings to connect your X account',
-        },
+        { error: 'X account not connected — go to Settings to connect your X account' },
         { status: 401 }
       );
     }
 
-    try {
-      let client: TwitterApi;
-
-      // Prefer OAuth 2.0 DB token if available, otherwise fall back to OAuth 1.0a env vars
-      if (tokenRecord) {
-        const refreshed = await refreshXToken(tokenRecord);
-        if (!refreshed || !refreshed.accessToken) {
-          return NextResponse.json(
-            { error: 'Failed to authenticate - token is invalid' },
-            { status: 401 }
-          );
-        }
-        client = new TwitterApi(refreshed.accessToken);
-      } else {
-        // Fall back to OAuth 1.0a env var credentials
-        const apiKey = process.env.X_API_KEY;
-        const apiSecret = process.env.X_API_SECRET;
-        const accToken = process.env.X_ACCESS_TOKEN;
-        const accSecret = process.env.X_ACCESS_SECRET;
-        if (!apiKey || !apiSecret || !accToken || !accSecret) {
-          return NextResponse.json(
-            { error: 'X OAuth 1.0a credentials not configured in environment' },
-            { status: 500 }
-          );
-        }
-        client = new TwitterApi({
-          appKey: apiKey,
-          appSecret: apiSecret,
-          accessToken: accToken,
-          accessSecret: accSecret,
-        });
-      }
-
-      const result = await client.v2.tweet(text);
-
-      return NextResponse.json({
-        success: true,
-        tweetId: result.data.id,
-      });
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error('[API] X posting error:', errorMsg);
-
-      if (errorMsg.includes('401') || errorMsg.includes('Unauthorized')) {
-        return NextResponse.json(
-          {
-            error: 'Authentication failed - reconnect your X account',
-            details: errorMsg,
-          },
-          { status: 401 }
-        );
-      } else if (errorMsg.includes('429') || errorMsg.includes('rate')) {
-        return NextResponse.json(
-          {
-            error: 'Rate limited - please wait before posting',
-            details: errorMsg,
-          },
-          { status: 429 }
-        );
-      }
-
-      return NextResponse.json(
-        {
-          error: 'Failed to post to X',
-          details: errorMsg.substring(0, 200),
-        },
-        { status: 500 }
-      );
+    if (result.success) {
+      return NextResponse.json({ success: true, tweetId: result.tweetId, url: result.url });
     }
+
+    const statusMap = { AUTH_FAILED: 401, RATE_LIMITED: 429, INVALID_TEXT: 400, CREDENTIALS_MISSING: 500, TIMEOUT: 504, UNKNOWN: 500 };
+    return NextResponse.json(
+      { error: result.error, code: result.code },
+      { status: statusMap[result.code] || 500 }
+    );
   } catch (error) {
     console.error('[API] Error in POST /api/post-to-x:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

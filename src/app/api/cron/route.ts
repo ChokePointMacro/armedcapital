@@ -13,7 +13,7 @@ import {
   generateSpeculationReport,
 } from '@/services/geminiService';
 import nodemailer from 'nodemailer';
-import { TwitterApi } from 'twitter-api-v2';
+import { postTweet } from '@/lib/xClient';
 
 function escapeHtml(str: string): string {
   return str
@@ -64,31 +64,26 @@ export async function GET(request: NextRequest) {
             continue;
           }
 
-          // Post to X via OAuth 1.0a
-          const apiKey = process.env.X_API_KEY;
-          const apiSecret = process.env.X_API_SECRET;
-          const accToken = process.env.X_ACCESS_TOKEN;
-          const accSecret = process.env.X_ACCESS_SECRET;
+          // Mark as processing FIRST to prevent double-post on concurrent cron runs
+          await updateScheduledPostStatus(post.id, 'processing' as any);
 
-          if (!apiKey || !apiSecret || !accToken || !accSecret) {
-            console.warn('[Cron] X OAuth 1.0a credentials not configured — skipping tweet');
+          // Post via shared xClient (has timeout + retry built in)
+          const xResult = await postTweet(content.substring(0, 280));
+
+          if (xResult.success) {
+            console.log(`[Cron] ✓ Posted tweet ${xResult.tweetId} for scheduled post ${post.id}`);
+            await updateScheduledPostStatus(post.id, 'posted');
+            results.postsProcessed++;
+          } else {
+            console.error(`[Cron] Tweet failed for post ${post.id}: ${xResult.error} (${xResult.code})`);
             await updateScheduledPostStatus(post.id, 'failed');
-            results.errors.push(`Post ${post.id}: X credentials not configured`);
-            continue;
+            results.errors.push(`Post ${post.id}: ${xResult.error}`);
+            // If rate limited, stop processing remaining posts
+            if (xResult.code === 'RATE_LIMITED') {
+              console.warn('[Cron] Rate limited — stopping batch');
+              break;
+            }
           }
-
-          const client = new TwitterApi({
-            appKey: apiKey,
-            appSecret: apiSecret,
-            accessToken: accToken,
-            accessSecret: accSecret,
-          });
-
-          const tweet = await client.v2.tweet(content.substring(0, 280));
-          console.log(`[Cron] ✓ Posted tweet ${tweet.data.id} for scheduled post ${post.id}`);
-
-          await updateScheduledPostStatus(post.id, 'posted');
-          results.postsProcessed++;
 
           // Rate limit safety: wait 2s between tweets
           if (postable.indexOf(post) < postable.length - 1) {
