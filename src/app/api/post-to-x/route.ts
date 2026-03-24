@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
-import { getPlatformToken } from '@/lib/db';
-import { postTweet, postTweetWithToken, hasOAuth1aEnvVars } from '@/lib/xClient';
+import { getPlatformToken, upsertPlatformToken } from '@/lib/db';
+import { postTweet, postTweetWithToken, refreshOAuth2Token, hasOAuth1aEnvVars } from '@/lib/xClient';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,8 +21,38 @@ export async function POST(request: NextRequest) {
     }
 
     let result;
-    if (tokenRecord) {
-      result = await postTweetWithToken(text, tokenRecord);
+    if (tokenRecord && tokenRecord.access_token !== 'oauth1a-env') {
+      // OAuth 2.0 token — refresh first and persist new tokens
+      const refreshed = await refreshOAuth2Token(tokenRecord);
+      if (refreshed?.accessToken) {
+        // Save refreshed tokens to DB so they stay valid for next time
+        try {
+          await upsertPlatformToken({
+            user_id: userId,
+            platform: 'x',
+            access_token: refreshed.accessToken,
+            refresh_token: refreshed.refreshToken,
+            handle: tokenRecord.handle,
+            expires_at: refreshed.expiresAt,
+          });
+        } catch {
+          // Non-fatal — we can still post with the refreshed token
+        }
+        result = await postTweetWithToken(text, {
+          access_token: refreshed.accessToken,
+          refresh_token: refreshed.refreshToken,
+        });
+      } else if (hasOAuth1aEnvVars()) {
+        result = await postTweet(text);
+      } else {
+        return NextResponse.json(
+          { error: 'X token expired — reconnect your X account in Settings' },
+          { status: 401 }
+        );
+      }
+    } else if (tokenRecord) {
+      // oauth1a-env marker — use env vars
+      result = await postTweet(text);
     } else if (hasOAuth1aEnvVars()) {
       result = await postTweet(text);
     } else {
@@ -36,7 +66,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, tweetId: result.tweetId, url: result.url });
     }
 
-    const statusMap = { AUTH_FAILED: 401, RATE_LIMITED: 429, INVALID_TEXT: 400, CREDENTIALS_MISSING: 500, TIMEOUT: 504, UNKNOWN: 500 };
+    const statusMap: Record<string, number> = { AUTH_FAILED: 401, RATE_LIMITED: 429, INVALID_TEXT: 400, CREDENTIALS_MISSING: 500, TIMEOUT: 504, UNKNOWN: 500 };
     return NextResponse.json(
       { error: result.error, code: result.code },
       { status: statusMap[result.code] || 500 }

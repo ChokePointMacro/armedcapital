@@ -409,7 +409,7 @@ export const Settings = ({ user, onLogout }: { user: UserData | null; onLogout: 
                 <span className="text-[9px] font-mono text-gray-500 italic">Active (via X login)</span>
               ) : (
                 <button
-                  onClick={() => connectOAuth('x/connect', 'OAUTH_X_CONNECT_SUCCESS')}
+                  onClick={() => connectOAuth('x', 'OAUTH_X_CONNECT_SUCCESS')}
                   className="flex items-center gap-2 px-4 py-2 bg-black border border-white/20 text-white text-[10px] font-mono uppercase tracking-widest hover:bg-white/10 transition-colors"
                 >
                   <XIcon size={12} /> Connect X

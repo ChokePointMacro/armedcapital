@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
-import { getPlatformToken } from '@/lib/db';
-import { postTweet } from '@/lib/xClient';
+import { getPlatformToken, upsertPlatformToken } from '@/lib/db';
+import { postTweet, postTweetWithToken, refreshOAuth2Token, hasOAuth1aEnvVars } from '@/lib/xClient';
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,13 +103,50 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Post to X via shared xClient (OAuth 1.0a with timeout + retry)
+    // Post to X — try OAuth 2.0 DB token first, fall back to OAuth 1.0a env vars
     if (platforms.includes('x')) {
-      const xResult = await postTweet(text.substring(0, 280));
-      if (xResult.success) {
-        results.x = { success: true, id: xResult.tweetId };
-      } else {
-        results.x = { success: false, error: xResult.error };
+      try {
+        const xToken = await getPlatformToken(userId!, 'x');
+        if (xToken && xToken.access_token !== 'oauth1a-env') {
+          // OAuth 2.0 — refresh and persist
+          const refreshed = await refreshOAuth2Token(xToken);
+          if (refreshed?.accessToken) {
+            try {
+              await upsertPlatformToken({
+                user_id: userId!,
+                platform: 'x',
+                access_token: refreshed.accessToken,
+                refresh_token: refreshed.refreshToken,
+                handle: xToken.handle,
+                expires_at: refreshed.expiresAt,
+              });
+            } catch { /* non-fatal */ }
+            const xResult = await postTweetWithToken(text.substring(0, 280), {
+              access_token: refreshed.accessToken,
+              refresh_token: refreshed.refreshToken,
+            });
+            results.x = xResult.success
+              ? { success: true, id: xResult.tweetId }
+              : { success: false, error: xResult.error };
+          } else {
+            // Refresh failed — try env var fallback
+            const xResult = await postTweet(text.substring(0, 280));
+            results.x = xResult.success
+              ? { success: true, id: xResult.tweetId }
+              : { success: false, error: xResult.error };
+          }
+        } else {
+          // oauth1a-env marker or no token — use env vars
+          const xResult = await postTweet(text.substring(0, 280));
+          results.x = xResult.success
+            ? { success: true, id: xResult.tweetId }
+            : { success: false, error: xResult.error };
+        }
+      } catch {
+        const xResult = await postTweet(text.substring(0, 280));
+        results.x = xResult.success
+          ? { success: true, id: xResult.tweetId }
+          : { success: false, error: xResult.error };
       }
     }
 
