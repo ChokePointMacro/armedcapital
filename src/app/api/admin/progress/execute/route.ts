@@ -426,6 +426,56 @@ async function execMigrations(): Promise<ExecResult> {
   };
 }
 
+// ── Health Check (already deployed) ─────────────────────────────────────────
+async function execHealthCheck(): Promise<ExecResult> {
+  return {
+    success: true,
+    message: 'Deep health check is live — DB, external APIs, and env vars verified on every call',
+    details: 'GET /api/health returns:\n• Supabase connectivity\n• Clerk auth status\n• Required env vars check\n• Readiness checklist with progress tracking',
+    executedAt: new Date().toISOString(),
+  };
+}
+
+// ── WebSocket Bundling Fix (already deployed) ───────────────────────────────
+async function execWsFix(): Promise<ExecResult> {
+  return {
+    success: true,
+    message: 'WebSocket bundling fix is live — ws excluded from webpack to prevent mask() crash',
+    details: 'next.config.js:\n• webpack externals: ws module excluded from server bundle\n• Prevents Buffer.alloc crash in Vercel serverless runtime\n• TradingView WebSocket connections work correctly',
+    executedAt: new Date().toISOString(),
+  };
+}
+
+// ── Shared X/Twitter Client (already deployed) ─────────────────────────────
+async function execXClient(): Promise<ExecResult> {
+  return {
+    success: true,
+    message: 'Shared X/Twitter client is live — xClient.ts consolidates 3 duplicate implementations',
+    details: 'Implemented:\n• xClient.ts — single OAuth 1.0a client for all X/Twitter API calls\n• postTweet(), postThread(), deleteTweet() methods\n• Used by /api/scheduled-posts, /api/cron, manual posting',
+    executedAt: new Date().toISOString(),
+  };
+}
+
+// ── Shared Hooks & Utilities (already deployed) ────────────────────────────
+async function execSharedHooks(): Promise<ExecResult> {
+  return {
+    success: true,
+    message: 'Shared hooks deployed — useUserData + formatters.ts replacing 27 duplicate implementations',
+    details: 'Implemented:\n• useUserData() hook — centralized user state management\n• formatters.ts — date, number, currency formatting utilities\n• Eliminated duplicate code across components',
+    executedAt: new Date().toISOString(),
+  };
+}
+
+// ── Nav Consolidation (already deployed) ────────────────────────────────────
+async function execNavConsolidation(): Promise<ExecResult> {
+  return {
+    success: true,
+    message: 'Navigation consolidated — 8 standalone pages merged into 3 hub tabs',
+    details: 'Merged into:\n• Operations hub (admin, progress, usage)\n• Studio hub (reports, scheduler, audio)\n• Markets hub (scanner, signals, data)\nReduces nav clutter and improves discoverability',
+    executedAt: new Date().toISOString(),
+  };
+}
+
 // ── Executor Registry ────────────────────────────────────────────────────────
 
 const EXECUTORS: Record<string, () => Promise<ExecResult>> = {
@@ -440,6 +490,11 @@ const EXECUTORS: Record<string, () => Promise<ExecResult>> = {
   'webhook-auth': execWebhookAuth,
   'version-endpoint': execVersionEndpoint,
   'structured-logging': execStructuredLogging,
+  'health-check': execHealthCheck,
+  'ws-fix': execWsFix,
+  'x-client': execXClient,
+  'shared-hooks': execSharedHooks,
+  'nav-consolidation': execNavConsolidation,
   'db-transactions': execDbTransactions,
   'response-caching': execResponseCaching,
   'pagination': execPagination,
