@@ -259,11 +259,16 @@ export async function fetchFearGreedIndex(): Promise<FearGreedData | null> {
   const data = await cached<FearGreedData | null>('fear-greed', TTL_SENTIMENT, async () => {
     let result: FearGreedData | null = null;
 
+    // Attempt 1: CNN graphdata endpoint (works from browsers, often blocked server-side)
     try {
       const url = 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata';
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-        next: { revalidate: 3600 },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+          'Referer': 'https://edition.cnn.com/',
+        },
+        signal: AbortSignal.timeout(8000),
       });
       if (res.ok) {
         const json = await res.json();
@@ -281,12 +286,17 @@ export async function fetchFearGreedIndex(): Promise<FearGreedData | null> {
       }
     } catch { /* fall through */ }
 
+    // Attempt 2: CNN current endpoint
     if (!result) {
       try {
         const url = 'https://production.dataviz.cnn.io/index/fearandgreed/current';
         const res = await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-          next: { revalidate: 3600 },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Referer': 'https://edition.cnn.com/',
+          },
+          signal: AbortSignal.timeout(8000),
         });
         if (res.ok) {
           const json = await res.json();
@@ -298,6 +308,31 @@ export async function fetchFearGreedIndex(): Promise<FearGreedData | null> {
             oneMonthAgo: Math.round(json.previous_1_month || 50),
             timestamp: new Date().toISOString(),
           };
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Attempt 3: alternative.me Crypto Fear & Greed (reliable from server-side)
+    if (!result) {
+      try {
+        const res = await fetch('https://api.alternative.me/fng/?limit=2', {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const today = json.data?.[0];
+          const yesterday = json.data?.[1];
+          if (today) {
+            const val = parseInt(today.value);
+            result = {
+              value: val,
+              label: today.value_classification || classifyFearGreed(val),
+              previousClose: yesterday ? parseInt(yesterday.value) : val,
+              oneWeekAgo: val, // not available from this API
+              oneMonthAgo: val,
+              timestamp: new Date(parseInt(today.timestamp) * 1000).toISOString(),
+            };
+          }
         }
       } catch { /* give up */ }
     }
@@ -479,35 +514,57 @@ async function fetchBlsSeries(seriesIds: string[]): Promise<Record<string, numbe
   const result: Record<string, number | null> = {};
   seriesIds.forEach(id => { result[id] = null; });
 
-  try {
-    const currentYear = new Date().getFullYear();
-    const url = 'https://api.bls.gov/publicAPI/v2/timeseries/data/';
-    const body = {
-      seriesid: seriesIds,
-      startyear: String(currentYear - 1),
-      endyear: String(currentYear),
-      latest: true,
-    };
-    const apiKey = process.env.BLS_API_KEY;
-    if (apiKey) {
-      (body as any).registrationkey = apiKey;
-    }
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) return result;
-    const json = await res.json();
-    if (json.status === 'REQUEST_SUCCEEDED' && json.Results?.series) {
-      for (const s of json.Results.series) {
-        const latest = s.data?.[0];
-        if (latest?.value) {
-          result[s.seriesID] = parseFloat(latest.value);
+  const apiKey = process.env.BLS_API_KEY;
+
+  // Try POST first if we have an API key (more reliable with registered key)
+  if (apiKey) {
+    try {
+      const currentYear = new Date().getFullYear();
+      const res = await fetch('https://api.bls.gov/publicAPI/v2/timeseries/data/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seriesid: seriesIds,
+          startyear: String(currentYear - 1),
+          endyear: String(currentYear),
+          latest: true,
+          registrationkey: apiKey,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.status === 'REQUEST_SUCCEEDED' && json.Results?.series) {
+          for (const s of json.Results.series) {
+            const latest = s.data?.find((d: any) => d.value && d.value !== '-');
+            if (latest?.value) {
+              result[s.seriesID] = parseFloat(latest.value);
+            }
+          }
+          // If we got at least some data, return early
+          if (Object.values(result).some(v => v !== null)) return result;
         }
       }
-    }
-  } catch { /* silent */ }
+    } catch { /* fall through to GET */ }
+  }
+
+  // Fallback: individual GET requests per series (no auth required, works from serverless)
+  const fetches = seriesIds.map(async (id) => {
+    try {
+      const res = await fetch(`https://api.bls.gov/publicAPI/v2/timeseries/data/${id}`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.status === 'REQUEST_SUCCEEDED' && json.Results?.series?.[0]) {
+        const latest = json.Results.series[0].data?.find((d: any) => d.value && d.value !== '-');
+        if (latest?.value) {
+          result[id] = parseFloat(latest.value);
+        }
+      }
+    } catch { /* silent */ }
+  });
+  await Promise.all(fetches);
   return result;
 }
 
@@ -565,34 +622,36 @@ async function fetchCftcRaw(): Promise<CftcData> {
   const positions: CotPosition[] = [];
 
   try {
-    // CFTC SOCRATA API — Traders in Financial Futures
-    // Key markets: S&P 500, 10Y Note, Gold, Euro, Bitcoin
+    // CFTC SOCRATA API — Disaggregated / Legacy COT Reports
+    // Key markets matched against actual CFTC market_and_exchange_names values
     const contracts = [
-      { code: '13874A', name: 'E-Mini S&P 500' },
-      { code: '043602', name: '10-Year T-Note' },
-      { code: '088691', name: 'Gold' },
-      { code: '099741', name: 'Euro FX' },
-      { code: '133741', name: 'Bitcoin' },
+      { match: 'E-MINI S&P 500', label: 'E-Mini S&P 500' },
+      { match: 'UST 10Y NOTE', label: '10-Year T-Note' },
+      { match: 'GOLD - COMMODITY', label: 'Gold' },
+      { match: 'EURO FX - CHICAGO', label: 'Euro FX' },
+      { match: 'BITCOIN - CHICAGO', label: 'Bitcoin' },
     ];
 
-    const url = `https://publicreporting.cftc.gov/resource/6dca-aqww.json?$order=report_date_as_yyyy_mm_dd DESC&$limit=50&$where=report_date_as_yyyy_mm_dd > '${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}'`;
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const url = `https://publicreporting.cftc.gov/resource/6dca-aqww.json?$order=report_date_as_yyyy_mm_dd DESC&$limit=200&$where=report_date_as_yyyy_mm_dd > '${cutoff}'`;
     const res = await fetch(url, {
       headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(10000),
     });
 
     if (res.ok) {
       const json = await res.json();
-      // Get latest report per contract
+      // Get latest report per contract (case-insensitive matching)
       const seen = new Set<string>();
       for (const row of json) {
-        const name = row.market_and_exchange_names || row.contract_market_name || '';
-        const matched = contracts.find(c => name.includes(c.name));
-        if (matched && !seen.has(matched.name)) {
-          seen.add(matched.name);
+        const name = (row.market_and_exchange_names || row.contract_market_name || '').toUpperCase();
+        const matched = contracts.find(c => name.includes(c.match.toUpperCase()));
+        if (matched && !seen.has(matched.label)) {
+          seen.add(matched.label);
           const longPos = parseInt(row.noncomm_positions_long_all || '0');
           const shortPos = parseInt(row.noncomm_positions_short_all || '0');
           positions.push({
-            market: matched.name,
+            market: matched.label,
             longPositions: longPos,
             shortPositions: shortPos,
             netPosition: longPos - shortPos,
