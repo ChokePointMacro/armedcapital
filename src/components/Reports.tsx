@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FileText, Trash2, ChevronDown, ChevronUp, Loader2, Search, X as XIcon } from 'lucide-react';
+import { FileText, Trash2, ChevronDown, ChevronUp, Loader2, Search, X as XIcon, Send, Clock, Check } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
@@ -306,13 +306,127 @@ const WeeklyContent = ({ report, hex }: { report: WeeklyReport; hex: string }) =
       ))}
     </div>
     {report.analysis?.globalSocialPost && (
-      <div className="p-3 bg-black/40 border border-btc-orange/10">
-        <p className="text-[9px] font-mono uppercase tracking-widest text-btc-orange/40 mb-1.5">Social Post</p>
-        <p className="text-xs font-mono text-gray-300">{report.analysis.globalSocialPost}</p>
-      </div>
+      <SocialPostCard text={report.analysis.globalSocialPost} hex={hex} />
     )}
   </div>
 );
+
+// ─── Social Post Card with Post / Schedule Actions ───────────────────────────
+
+const SocialPostCard = ({ text, hex }: { text: string; hex: string }) => {
+  const [posting, setPosting] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [showScheduler, setShowScheduler] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+
+  // Default to 1 hour from now in local datetime format
+  const getDefaultDate = () => {
+    const d = new Date(Date.now() + 3600000);
+    return d.toISOString().slice(0, 16);
+  };
+
+  const handlePostNow = async () => {
+    setPosting(true);
+    setResult(null);
+    try {
+      const res = await apiFetch('/api/post-to-x', {
+        method: 'POST',
+        body: JSON.stringify({ text: text.substring(0, 280) }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setResult({ success: true });
+      } else {
+        setResult({ success: false, error: data.error || `HTTP ${res.status}` });
+      }
+    } catch (err) {
+      setResult({ success: false, error: err instanceof Error ? err.message : 'Network error' });
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const handleSchedule = async () => {
+    if (!scheduleDate) return;
+    setScheduling(true);
+    setResult(null);
+    try {
+      const res = await apiFetch('/api/scheduled-posts', {
+        method: 'POST',
+        body: JSON.stringify({ content: text.substring(0, 280), scheduledAt: scheduleDate }),
+      });
+      if (res.ok) {
+        setResult({ success: true });
+        setShowScheduler(false);
+      } else {
+        const data = await res.json();
+        setResult({ success: false, error: data.error || `HTTP ${res.status}` });
+      }
+    } catch (err) {
+      setResult({ success: false, error: err instanceof Error ? err.message : 'Network error' });
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  return (
+    <div className="p-3 bg-black/40 border border-btc-orange/10 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[9px] font-mono uppercase tracking-widest text-btc-orange/40">Social Post</p>
+        <span className="text-[9px] font-mono text-gray-600">{text.length}/280</span>
+      </div>
+      <p className="text-xs font-mono text-gray-300">{text}</p>
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-2 pt-1 border-t border-btc-orange/5">
+        <button
+          onClick={handlePostNow}
+          disabled={posting || (result?.success === true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-btc-orange text-black text-[9px] font-mono uppercase tracking-widest hover:shadow-[0_0_10px_rgba(247,147,26,0.3)] transition-all disabled:opacity-50"
+        >
+          {posting ? <Loader2 size={10} className="animate-spin" /> : result?.success ? <Check size={10} /> : <Send size={10} />}
+          {posting ? 'Posting...' : result?.success ? 'Posted' : 'Post to X'}
+        </button>
+        <button
+          onClick={() => { setShowScheduler(!showScheduler); if (!scheduleDate) setScheduleDate(getDefaultDate()); }}
+          disabled={result?.success === true}
+          className="flex items-center gap-1.5 px-3 py-1.5 border border-btc-orange/30 text-btc-orange text-[9px] font-mono uppercase tracking-widest hover:bg-btc-orange/10 transition-colors disabled:opacity-50"
+        >
+          <Clock size={10} /> Schedule
+        </button>
+      </div>
+
+      {/* Schedule datetime picker */}
+      {showScheduler && (
+        <div className="flex items-center gap-2 pt-2">
+          <input
+            type="datetime-local"
+            value={scheduleDate}
+            onChange={e => setScheduleDate(e.target.value)}
+            min={new Date().toISOString().slice(0, 16)}
+            className="flex-1 px-3 py-1.5 bg-black border border-btc-orange/20 text-xs font-mono text-white focus:border-btc-orange outline-none"
+          />
+          <button
+            onClick={handleSchedule}
+            disabled={scheduling || !scheduleDate}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-btc-orange text-black text-[9px] font-mono uppercase tracking-widest disabled:opacity-50"
+          >
+            {scheduling ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+            Confirm
+          </button>
+        </div>
+      )}
+
+      {/* Result feedback */}
+      {result && (
+        <p className={cn("text-[10px] font-mono", result.success ? "text-emerald-400" : "text-red-400")}>
+          {result.success ? '✓ Success' : `✗ ${result.error}`}
+        </p>
+      )}
+    </div>
+  );
+};
 
 // ─── Forecast Report Content ──────────────────────────────────────────────────
 
@@ -340,5 +454,8 @@ const ForecastContent = ({ report, hex }: { report: ForecastReport; hex: string 
         </div>
       ))}
     </div>
+    {report.analysis?.globalSocialPost && (
+      <SocialPostCard text={report.analysis.globalSocialPost} hex={hex} />
+    )}
   </div>
 );

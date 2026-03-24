@@ -62,8 +62,8 @@ export const Compose = ({ user }: { user: UserData | null }) => {
     if (!dateStr) return;
     setLoading(true);
     try {
-      const res = await apiFetch('/api/schedule-post', { method: 'POST', body: JSON.stringify({ content, scheduledAt: dateStr }) });
-      if (res.ok) { alert("Scheduled successfully!"); router.push('/schedule'); }
+      const res = await apiFetch('/api/scheduled-posts', { method: 'POST', body: JSON.stringify({ content, scheduledAt: dateStr }) });
+      if (res.ok) { alert("Scheduled successfully!"); router.push('/studio'); }
     } finally { setLoading(false); }
   };
 
