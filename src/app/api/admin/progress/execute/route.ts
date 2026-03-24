@@ -12,6 +12,7 @@ type ExecResult = {
   message: string;
   details?: string;
   requiresDeploy?: boolean;
+  executedAt?: string;
 };
 
 async function getSupabase() {

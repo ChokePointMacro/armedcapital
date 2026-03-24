@@ -262,10 +262,10 @@ export async function GET(request: NextRequest) {
       results.errors.push(`Reports task: ${err}`);
     }
 
-    return NextResponse.json({
-      ok: true,
-      ...results,
-    });
+      return NextResponse.json({
+        ok: true,
+        ...results,
+      });
     } finally {
       // Always release the distributed lock
       await redis.del(lockKey).catch(() => {});
