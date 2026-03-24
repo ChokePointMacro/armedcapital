@@ -1018,6 +1018,20 @@ export async function fetchAllEnrichedData(): Promise<EnrichedData> {
   return { fred, finnhub, fearGreed, coinGecko, tradingView, tvLiveQuotes, bls, cftc, treasury, defiLlama };
 }
 
+/** Clear all in-memory caches — used by reconnect endpoint to force fresh fetches */
+export function clearAllMemoryCaches() {
+  fredCache = null;
+  finnhubCache = null;
+  fgCache = null;
+  cgCache = null;
+  blsCache = null;
+  cftcCache = null;
+  treasuryCache = null;
+  defiCache = null;
+  tvCache = null;
+  tvQuotesCache = null;
+}
+
 /** Build a combined macro context block for AI prompts */
 export function enrichedDataToPromptBlock(data: EnrichedData): string {
   return [

@@ -117,9 +117,27 @@ function LimitBar({ label, used, max, window }: { label: string } & RateLimit) {
   );
 }
 
-function ServiceCard({ service }: { service: ServiceStatus }) {
+// Map service display names → reconnect endpoint source keys
+const RECONNECT_SOURCE_MAP: Record<string, string> = {
+  'FRED (Federal Reserve)': 'fred',
+  'Finnhub': 'finnhub',
+  'CNN Fear & Greed': 'fear-greed',
+  'CoinGecko': 'coingecko',
+  'BLS (Labor Statistics)': 'bls',
+  'CFTC COT Reports': 'cftc',
+  'Treasury.gov': 'treasury',
+  'DefiLlama': 'defi-llama',
+  'TradingView WebSocket': 'tv-quotes',
+};
+
+function ServiceCard({ service, onReconnect, reconnecting }: {
+  service: ServiceStatus;
+  onReconnect?: (sourceKey: string) => void;
+  reconnecting?: boolean;
+}) {
   const latency = service.latencyMs;
   const latencyColor = latency === null ? 'text-gray-600' : latency < 300 ? 'text-green-400' : latency < 1000 ? 'text-yellow-400' : 'text-red-400';
+  const sourceKey = RECONNECT_SOURCE_MAP[service.name];
 
   return (
     <div className={`border rounded-lg p-4 transition-all ${
@@ -150,6 +168,21 @@ function ServiceCard({ service }: { service: ServiceStatus }) {
           <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
           <span className="text-[10px] font-mono text-red-400 truncate">{service.error}</span>
         </div>
+      )}
+
+      {/* Reconnect button for disconnected sources that have a reconnect key */}
+      {!service.connected && sourceKey && onReconnect && (
+        <button
+          onClick={() => onReconnect(sourceKey)}
+          disabled={reconnecting}
+          className="flex items-center gap-1.5 w-full mt-2 mb-2 px-3 py-1.5 rounded border border-btc-orange/30 bg-btc-orange/5 text-[10px] font-mono text-btc-orange hover:bg-btc-orange/10 hover:border-btc-orange/50 transition-colors disabled:opacity-50"
+        >
+          {reconnecting ? (
+            <><Loader2 className="w-3 h-3 animate-spin" /> Reconnecting...</>
+          ) : (
+            <><Wifi className="w-3 h-3" /> Reconnect</>
+          )}
+        </button>
       )}
 
       {/* Tier badge */}
@@ -188,6 +221,9 @@ export function Usage({ user }: { user: any }) {
   const [data, setData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState<Record<string, boolean>>({});
+  const [reconnectMsg, setReconnectMsg] = useState<string | null>(null);
+  const loadRef = useRef<() => void>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -201,6 +237,55 @@ export function Usage({ user }: { user: any }) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  // Keep ref updated so reconnect callbacks can trigger a refresh
+  loadRef.current = load;
+
+  const reconnectSource = useCallback(async (sourceKey: string) => {
+    setReconnecting(prev => ({ ...prev, [sourceKey]: true }));
+    setReconnectMsg(null);
+    try {
+      const res = await apiFetch('/api/admin/reconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: sourceKey }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setReconnectMsg(json.message);
+        loadRef.current?.();
+      } else {
+        setReconnectMsg(json.error || 'Reconnect failed');
+      }
+    } catch (err) {
+      setReconnectMsg(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setReconnecting(prev => ({ ...prev, [sourceKey]: false }));
+    }
+  }, []);
+
+  const reconnectAll = useCallback(async () => {
+    setReconnecting(prev => ({ ...prev, __all__: true }));
+    setReconnectMsg(null);
+    try {
+      const res = await apiFetch('/api/admin/reconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setReconnectMsg(json.message);
+        loadRef.current?.();
+      } else {
+        setReconnectMsg(json.error || 'Reconnect all failed');
+      }
+    } catch (err) {
+      setReconnectMsg(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setReconnecting(prev => ({ ...prev, __all__: false }));
     }
   }, []);
 
@@ -228,15 +313,41 @@ export function Usage({ user }: { user: any }) {
             </p>
           )}
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-800 bg-gray-900 text-[10px] font-mono text-gray-400 hover:text-btc-orange hover:border-gray-700 transition-colors disabled:opacity-50"
-        >
-          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-          {loading ? 'Checking...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2">
+          {data && data.summary.disconnected > 0 && (
+            <button
+              onClick={reconnectAll}
+              disabled={reconnecting.__all__}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-btc-orange/30 bg-btc-orange/5 text-[10px] font-mono text-btc-orange hover:bg-btc-orange/10 hover:border-btc-orange/50 transition-colors disabled:opacity-50"
+            >
+              {reconnecting.__all__ ? (
+                <><Loader2 className="w-3 h-3 animate-spin" /> Reconnecting...</>
+              ) : (
+                <><Wifi className="w-3 h-3" /> Reconnect All ({data.summary.disconnected})</>
+              )}
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-800 bg-gray-900 text-[10px] font-mono text-gray-400 hover:text-btc-orange hover:border-gray-700 transition-colors disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+            {loading ? 'Checking...' : 'Refresh'}
+          </button>
+        </div>
       </div>
+
+      {/* Reconnect status message */}
+      {reconnectMsg && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded border border-btc-orange/20 bg-btc-orange/5">
+          <Wifi className="w-3.5 h-3.5 text-btc-orange flex-shrink-0" />
+          <span className="text-[11px] font-mono text-btc-orange">{reconnectMsg}</span>
+          <button onClick={() => setReconnectMsg(null)} className="ml-auto text-gray-600 hover:text-gray-400 transition-colors">
+            <XCircle className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Platform Analytics */}
       {data && data.consumption && (
@@ -367,7 +478,14 @@ export function Usage({ user }: { user: any }) {
             <span className="h-px flex-1 bg-gray-800" />
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {services.map(s => <ServiceCard key={s.name} service={s} />)}
+            {services.map(s => (
+              <ServiceCard
+                key={s.name}
+                service={s}
+                onReconnect={reconnectSource}
+                reconnecting={reconnecting[RECONNECT_SOURCE_MAP[s.name]] || reconnecting.__all__}
+              />
+            ))}
           </div>
         </div>
       ))}
