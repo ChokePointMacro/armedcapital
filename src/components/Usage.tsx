@@ -223,7 +223,7 @@ export function Usage({ user }: { user: any }) {
   const [error, setError] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState<Record<string, boolean>>({});
   const [reconnectMsg, setReconnectMsg] = useState<string | null>(null);
-  const loadRef = useRef<() => void>();
+  const loadRef = useRef<(() => void) | undefined>(undefined);
 
   const load = useCallback(async () => {
     setLoading(true);
