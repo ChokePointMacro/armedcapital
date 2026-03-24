@@ -78,16 +78,33 @@ interface RefreshedToken {
   expiresAt?: number;
 }
 
-/** Refresh an OAuth 2.0 token, with 10s timeout */
+/** Refresh an OAuth 2.0 token, with 10s timeout.
+ *  Reads client credentials from env vars first, then falls back to platform_credentials DB table. */
 export async function refreshOAuth2Token(tokenRecord: TokenRecord): Promise<RefreshedToken | null> {
   if (!tokenRecord.refresh_token) {
     return { accessToken: tokenRecord.access_token };
   }
 
-  const clientId = process.env.X_CLIENT_ID;
-  const clientSecret = process.env.X_CLIENT_SECRET;
+  // Try env vars first, then fall back to DB
+  let clientId = process.env.X_CLIENT_ID;
+  let clientSecret = process.env.X_CLIENT_SECRET;
+
   if (!clientId || !clientSecret) {
-    console.error('[xClient] X_CLIENT_ID or X_CLIENT_SECRET not configured');
+    try {
+      const { getPlatformCredential } = await import('@/lib/db');
+      const [idRow, secretRow] = await Promise.all([
+        getPlatformCredential('x', 'client_id'),
+        getPlatformCredential('x', 'client_secret'),
+      ]);
+      clientId = idRow?.key_value || undefined;
+      clientSecret = secretRow?.key_value || undefined;
+    } catch {
+      // DB lookup failed — fall through
+    }
+  }
+
+  if (!clientId || !clientSecret) {
+    console.error('[xClient] X client credentials not found in env vars or DB');
     return null;
   }
 
