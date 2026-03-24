@@ -39,15 +39,26 @@ export async function POST(request: NextRequest) {
     }
 
     // Build redirect URI (must match what was used in the auth URL)
-    const origin = request.headers.get('origin') || request.nextUrl.origin;
+    // Use X-Forwarded-Host (set by Vercel/proxies) → Host header → nextUrl as fallback
+    const forwardedHost = request.headers.get('x-forwarded-host');
+    const proto = request.headers.get('x-forwarded-proto') || 'https';
+    const host = forwardedHost || request.headers.get('host') || request.nextUrl.host;
+    const origin = `${proto}://${host}`;
     const redirectUri = `${origin}/auth/x/callback`;
 
+    console.log('[X OAuth] Token exchange redirect_uri:', redirectUri);
+
     // Exchange authorization code for tokens
+    // Twitter requires URL-encoding client_id & client_secret before base64 (RFC 1738)
+    const basicAuth = Buffer.from(
+      `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`
+    ).toString('base64');
+
     const tokenRes = await fetch('https://api.twitter.com/2/oauth2/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+        Authorization: `Basic ${basicAuth}`,
       },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
