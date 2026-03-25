@@ -1,15 +1,17 @@
 // ── Admin Configuration ──────────────────────────────────────────────────────
-// Define admin emails here. Only these users get access to billing,
-// budget controls, and other sensitive admin-only features.
-// TODO: Move to env var or database for production security.
+// Admin emails are read from the ADMIN_EMAILS env var (comma-separated).
+// Example: ADMIN_EMAILS="alice@example.com,bob@example.com"
 
-export const ADMIN_EMAILS: string[] = [
-  'm@aol.com',
-  'michael.nield7@gmail.com',
-  // Add additional admin emails here
-];
+function getAdminEmails(): string[] {
+  const raw = process.env.ADMIN_EMAILS;
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
 
 export function isAdmin(email: string | null | undefined): boolean {
   if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase());
+  return getAdminEmails().includes(email.toLowerCase());
 }
