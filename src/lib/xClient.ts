@@ -112,14 +112,21 @@ export async function refreshOAuth2Token(tokenRecord: TokenRecord): Promise<Refr
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TWEET_TIMEOUT_MS);
 
-    const res = await fetch('https://token.twitter.com/2/oauth2/token', {
+    // Use api.twitter.com (not token.twitter.com which has DNS issues from serverless)
+    // Use Basic Auth header (RFC-compliant for confidential clients, matches callback route)
+    const basicAuth = Buffer.from(
+      `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`
+    ).toString('base64');
+
+    const res = await fetch('https://api.twitter.com/2/oauth2/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${basicAuth}`,
+      },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: tokenRecord.refresh_token,
-        client_id: clientId,
-        client_secret: clientSecret,
       }).toString(),
       signal: controller.signal,
     });
