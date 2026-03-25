@@ -7,6 +7,7 @@ import {
   saveReport,
   getAppSetting,
   getPlatformToken,
+  upsertPlatformToken,
 } from '@/lib/db';
 import {
   generateWeeklyReport,
@@ -14,7 +15,7 @@ import {
   generateSpeculationReport,
 } from '@/services/geminiService';
 import nodemailer from 'nodemailer';
-import { postTweet, postTweetWithToken, hasOAuth1aEnvVars } from '@/lib/xClient';
+import { postTweet, postTweetWithToken, refreshOAuth2Token, hasOAuth1aEnvVars } from '@/lib/xClient';
 import { redis } from '@/lib/redis';
 
 function escapeHtml(str: string): string {
@@ -91,11 +92,38 @@ export async function GET(request: NextRequest) {
           let xResult;
           const userToken = post.user_id ? await getPlatformToken(post.user_id, 'x') : null;
           if (userToken?.access_token && userToken.access_token !== 'oauth1a-env') {
-            // Use OAuth 2.0 tokens from DB (connected via PKCE flow)
-            xResult = await postTweetWithToken(content.substring(0, 280), {
-              access_token: userToken.access_token,
-              refresh_token: userToken.refresh_token,
-            });
+            // OAuth 2.0 token â refresh first and persist (tokens expire after 2h)
+            const refreshed = await refreshOAuth2Token(userToken);
+            if (refreshed?.accessToken) {
+              // Save refreshed tokens to DB so they stay valid for next cron run
+              try {
+                await upsertPlatformToken({
+                  user_id: post.user_id,
+                  platform: 'x',
+                  access_token: refreshed.accessToken,
+                  refresh_token: refreshed.refreshToken,
+                  handle: userToken.handle,
+                  expires_at: refreshed.expiresAt,
+                });
+              } catch (tokenErr) {
+                console.warn(`[Cron] Failed to persist refreshed token for user ${post.user_id}:`, tokenErr);
+              }
+              xResult = await postTweetWithToken(content.substring(0, 280), {
+                access_token: refreshed.accessToken,
+                refresh_token: refreshed.refreshToken,
+              });
+            } else if (hasOAuth1aEnvVars()) {
+              console.warn(`[Cron] OAuth 2.0 refresh failed for user ${post.user_id}, falling back to OAuth 1.0a`);
+              xResult = await postTweet(content.substring(0, 280));
+            } else {
+              console.error(`[Cron] Token refresh failed and no fallback for user ${post.user_id}`);
+              await updateScheduledPostStatus(post.id, 'failed', {
+                code: 'AUTH_FAILED',
+                message: 'X token expired and refresh failed â reconnect in Settings',
+              });
+              results.errors.push(`Post ${post.id}: Token refresh failed`);
+              continue;
+            }
           } else if (hasOAuth1aEnvVars()) {
             // Fallback to OAuth 1.0a env vars
             xResult = await postTweet(content.substring(0, 280));
@@ -132,13 +160,13 @@ export async function GET(request: NextRequest) {
             await new Promise(resolve => setTimeout(resolve, 2000));
           }
         } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error);
           console.error(`[Cron] Failed to post tweet for post ${post.id}:`, error);
+          const errMsg = error instanceof Error ? error.message : String(error);
           await updateScheduledPostStatus(post.id, 'failed', {
             code: 'UNKNOWN',
             message: errMsg.substring(0, 200),
           });
-          results.errors.push(`Post ${post.id}: ${errMsg}`);
+          results.errors.push(`Post ${post.id}: ${error}`);
         }
       }
     } catch (err) {
