@@ -38,9 +38,11 @@ export async function POST(request: NextRequest) {
         } catch {
           // Non-fatal — we can still post with the refreshed token
         }
+        // Pass WITHOUT refresh_token — we already refreshed + persisted above.
+        // Including refresh_token would trigger a second refresh, consuming
+        // the single-use token we just saved to DB.
         result = await postTweetWithToken(text, {
           access_token: refreshed.accessToken,
-          refresh_token: refreshed.refreshToken,
         });
       } else if (hasOAuth1aEnvVars()) {
         result = await postTweet(text);
@@ -66,7 +68,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, tweetId: result.tweetId, url: result.url });
     }
 
-    const statusMap: Record<string, number> = { AUTH_FAILED: 401, RATE_LIMITED: 429, INVALID_TEXT: 400, CREDENTIALS_MISSING: 500, TIMEOUT: 504, UNKNOWN: 500 };
+    const statusMap: Record<string, number> = { AUTH_FAILED: 401, RATE_LIMITED: 429, INVALID_TEXT: 400, CREDENTIALS_MISSING: 500, TIMEOUT: 504, API_TIER: 402, UNKNOWN: 500 };
     return NextResponse.json(
       { error: result.error, code: result.code },
       { status: statusMap[result.code] || 500 }
