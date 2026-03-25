@@ -159,6 +159,12 @@ export const Schedule = () => {
                           )}>{post.status}</span>
                         </div>
                         <p className="text-xs text-gray-400 leading-relaxed line-clamp-2">{displayContent}</p>
+                        {post.status === 'failed' && post.error_code && (
+                          <div className="flex items-start gap-2 mt-1.5 px-2 py-1.5 bg-red-500/5 border border-red-500/15 rounded-sm">
+                            <span className="shrink-0 text-[8px] font-mono font-bold uppercase tracking-wider text-red-400/70 bg-red-500/10 px-1 py-0.5 rounded-sm">{post.error_code}</span>
+                            <p className="text-[10px] font-mono text-red-400/60 leading-relaxed">{post.error_message}</p>
+                          </div>
+                        )}
                       </div>
                       {post.status === 'pending' && (
                         <button onClick={() => handleDelete(post.id)} className="shrink-0 p-2 text-red-500/40 hover:text-red-500 hover:bg-red-500/10 transition-colors rounded-sm">
