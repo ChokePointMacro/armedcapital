@@ -25,7 +25,7 @@ export interface XPostResult {
 export interface XPostError {
   success: false;
   error: string;
-  code: 'AUTH_FAILED' | 'RATE_LIMITED' | 'INVALID_TEXT' | 'CREDENTIALS_MISSING' | 'TIMEOUT' | 'UNKNOWN';
+  code: 'AUTH_FAILED' | 'RATE_LIMITED' | 'INVALID_TEXT' | 'CREDENTIALS_MISSING' | 'TIMEOUT' | 'API_TIER' | 'UNKNOWN';
   retryAfterMs?: number;
 }
 
@@ -248,6 +248,11 @@ async function tweetWithRetry(client: TwitterApi, text: string, attempt = 0): Pr
         code: 'RATE_LIMITED',
         retryAfterMs: retryAfter,
       };
+    }
+
+    // API tier insufficient (402 Payment Required)
+    if (msg.includes('402')) {
+      return { success: false, error: 'X API tier does not support posting \u2014 upgrade to Basic ($100/mo) at developer.x.com', code: 'API_TIER' };
     }
 
     // Auth failed (401/403)
