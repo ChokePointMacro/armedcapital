@@ -108,9 +108,12 @@ export async function GET(request: NextRequest) {
               } catch (tokenErr) {
                 console.warn(`[Cron] Failed to persist refreshed token for user ${post.user_id}:`, tokenErr);
               }
+              // Pass WITHOUT refresh_token so postTweetWithToken skips the
+              // internal refresh (we already refreshed + persisted above).
+              // Passing refresh_token would trigger a SECOND refresh, consuming
+              // the single-use token we just saved to DB.
               xResult = await postTweetWithToken(content.substring(0, 280), {
                 access_token: refreshed.accessToken,
-                refresh_token: refreshed.refreshToken,
               });
             } else if (hasOAuth1aEnvVars()) {
               console.warn(`[Cron] OAuth 2.0 refresh failed for user ${post.user_id}, falling back to OAuth 1.0a`);
