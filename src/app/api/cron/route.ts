@@ -6,6 +6,7 @@ import {
   updateScheduledReport,
   saveReport,
   getAppSetting,
+  getPlatformToken,
 } from '@/lib/db';
 import {
   generateWeeklyReport,
@@ -13,7 +14,7 @@ import {
   generateSpeculationReport,
 } from '@/services/geminiService';
 import nodemailer from 'nodemailer';
-import { postTweet } from '@/lib/xClient';
+import { postTweet, postTweetWithToken, hasOAuth1aEnvVars } from '@/lib/xClient';
 import { redis } from '@/lib/redis';
 
 function escapeHtml(str: string): string {
@@ -86,8 +87,24 @@ export async function GET(request: NextRequest) {
           // Mark as processing FIRST to prevent double-post on concurrent cron runs
           await updateScheduledPostStatus(post.id, 'processing' as any);
 
-          // Post via shared xClient (has timeout + retry built in)
-          const xResult = await postTweet(content.substring(0, 280));
+          // Post via shared xClient — prefer OAuth 2.0 DB tokens, fallback to OAuth 1.0a env vars
+          let xResult;
+          const userToken = post.user_id ? await getPlatformToken(post.user_id, 'x') : null;
+          if (userToken?.access_token && userToken.access_token !== 'oauth1a-env') {
+            // Use OAuth 2.0 tokens from DB (connected via PKCE flow)
+            xResult = await postTweetWithToken(content.substring(0, 280), {
+              access_token: userToken.access_token,
+              refresh_token: userToken.refresh_token,
+            });
+          } else if (hasOAuth1aEnvVars()) {
+            // Fallback to OAuth 1.0a env vars
+            xResult = await postTweet(content.substring(0, 280));
+          } else {
+            console.error(`[Cron] No X credentials available for user ${post.user_id}`);
+            await updateScheduledPostStatus(post.id, 'failed');
+            results.errors.push(`Post ${post.id}: No X credentials available`);
+            continue;
+          }
 
           if (xResult.success) {
             console.log(`[Cron] ✓ Posted tweet ${xResult.tweetId} for scheduled post ${post.id}`);
