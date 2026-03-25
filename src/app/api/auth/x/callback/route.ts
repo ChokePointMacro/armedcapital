@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { safeAuth } from '@/lib/authHelper';
-import { getPendingAuth, deletePendingAuth, upsertPlatformToken, getPlatformCredential } from '@/lib/db';
+import { getPendingAuth, deletePendingAuth, upsertPlatformToken, getPlatformCredential, upsertUser } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +101,9 @@ export async function POST(request: NextRequest) {
     } catch {
       // Non-fatal — we still have the tokens
     }
+
+    // Ensure user exists in DB (Clerk user may not have a row yet)
+    await upsertUser({ id: userId });
 
     // Store tokens in DB
     const expiresAt = tokenData.expires_in
