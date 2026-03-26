@@ -453,11 +453,22 @@ export function TradingBot({ user }: { user: any }) {
   const [performance, setPerformance] = useState<BotPerformance[]>([]);
   const [botConfig, setBotConfig] = useState<BotConfig | null>(null);
   const [logs, setLogs] = useState<BotLog[]>([]);
-  const [botStatus, setBotStatus] = useState<'running' | 'paused' | 'stopped'>('stopped');
+  const [botStatus, setBotStatus] = useState<'running' | 'paused' | 'offline'>('offline');
+  const [statusMessage, setStatusMessage] = useState<string>('');
 
   const openPositions = positions.filter(p => p.status === 'open');
   const closedPositions = positions.filter(p => p.status === 'closed');
   const latestPerf = performance.length > 0 ? performance[0] : null;
+
+  // ─── Status Polling ─────────────────────────────────────────────
+
+  const checkStatus = useCallback(async () => {
+    const data = await safeFetch('/api/tradingbot/status');
+    if (data) {
+      setBotStatus(data.status === 'running' ? 'running' : data.status === 'paused' ? 'paused' : 'offline');
+      setStatusMessage(data.message || '');
+    }
+  }, []);
 
   // ─── Data Loading ─────────────────────────────────────────────
 
@@ -483,13 +494,13 @@ export function TradingBot({ user }: { user: any }) {
     }
   }, []);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { loadAll(); checkStatus(); }, [loadAll, checkStatus]);
 
-  // Auto-refresh
+  // Auto-refresh data + status
   useEffect(() => {
-    const timer = setInterval(() => loadAll(true), REFRESH);
+    const timer = setInterval(() => { loadAll(true); checkStatus(); }, REFRESH);
     return () => clearInterval(timer);
-  }, [loadAll]);
+  }, [loadAll, checkStatus]);
 
   // ─── Commands ─────────────────────────────────────────────────
 
@@ -565,21 +576,63 @@ export function TradingBot({ user }: { user: any }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Status indicator */}
+          <div className="flex items-center gap-1.5 mr-2">
+            <div className={`w-2 h-2 rounded-full ${
+              botStatus === 'running' ? 'bg-green-400 animate-pulse' :
+              botStatus === 'paused' ? 'bg-yellow-400' :
+              'bg-gray-600'
+            }`} />
+            <span className={`text-[9px] font-mono uppercase tracking-wider ${
+              botStatus === 'running' ? 'text-green-400' :
+              botStatus === 'paused' ? 'text-yellow-400' :
+              'text-gray-600'
+            }`}>
+              {botStatus}
+            </span>
+          </div>
           {/* Bot controls */}
+          {botStatus === 'offline' ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-800 bg-gray-900/80 text-[10px] font-mono text-gray-500">
+                <Square className="w-3 h-3" />
+                <span>Start bot locally:</span>
+                <code className="text-btc-orange bg-gray-800/50 px-1.5 py-0.5 rounded text-[9px]">python -m bot.main</code>
+              </div>
+            </div>
+          ) : botStatus === 'paused' ? (
+            <>
+              <button
+                onClick={() => sendCommand('resume')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-green-900/30 bg-green-950/20 text-[10px] font-mono text-green-400 hover:bg-green-900/30 transition-colors"
+              >
+                <Play className="w-3 h-3" /> Resume
+              </button>
+              <button
+                onClick={() => sendCommand('kill')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-red-900/30 bg-red-950/20 text-[10px] font-mono text-red-400 hover:bg-red-900/30 transition-colors"
+              >
+                <Square className="w-3 h-3" /> Stop
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => sendCommand('pause')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-yellow-900/30 bg-yellow-950/20 text-[10px] font-mono text-yellow-400 hover:bg-yellow-900/30 transition-colors"
+              >
+                <Pause className="w-3 h-3" /> Pause
+              </button>
+              <button
+                onClick={() => sendCommand('kill')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-red-900/30 bg-red-950/20 text-[10px] font-mono text-red-400 hover:bg-red-900/30 transition-colors"
+              >
+                <Square className="w-3 h-3" /> Stop
+              </button>
+            </>
+          )}
           <button
-            onClick={() => sendCommand('resume')}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-green-900/30 bg-green-950/20 text-[10px] font-mono text-green-400 hover:bg-green-900/30 transition-colors"
-          >
-            <Play className="w-3 h-3" /> Start
-          </button>
-          <button
-            onClick={() => sendCommand('pause')}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-yellow-900/30 bg-yellow-950/20 text-[10px] font-mono text-yellow-400 hover:bg-yellow-900/30 transition-colors"
-          >
-            <Pause className="w-3 h-3" /> Pause
-          </button>
-          <button
-            onClick={() => loadAll(true)}
+            onClick={() => { loadAll(true); checkStatus(); }}
             disabled={loading}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded border border-gray-800 bg-gray-900 text-[10px] font-mono text-gray-400 hover:text-btc-orange hover:border-gray-700 transition-colors disabled:opacity-50"
           >
@@ -716,7 +769,11 @@ export function TradingBot({ user }: { user: any }) {
           {positions.length === 0 ? (
             <div className="border border-gray-800/50 rounded-lg p-8 bg-gray-950/30 text-center">
               <Target className="w-6 h-6 text-gray-700 mx-auto mb-2" />
-              <p className="text-[11px] font-mono text-gray-600">No positions yet. Start the bot to begin scanning.</p>
+              <p className="text-[11px] font-mono text-gray-600">
+                {botStatus === 'offline'
+                  ? 'No positions yet. Start the bot locally with: python -m bot.main'
+                  : 'No positions yet. Bot is scanning for opportunities...'}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -810,7 +867,11 @@ export function TradingBot({ user }: { user: any }) {
           </div>
           <div className="p-3 max-h-[600px] overflow-y-auto">
             {logs.length === 0 ? (
-              <p className="text-[11px] font-mono text-gray-600 text-center py-8">No logs yet. Start the bot to see activity.</p>
+              <p className="text-[11px] font-mono text-gray-600 text-center py-8">
+                {botStatus === 'offline'
+                  ? 'No logs yet. Start the bot locally with: python -m bot.main'
+                  : 'No logs yet. Bot is running...'}
+              </p>
             ) : (
               logs.map(log => <LogRow key={log.id} log={log} />)
             )}
