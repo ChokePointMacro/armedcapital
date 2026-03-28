@@ -159,7 +159,7 @@ export function YouTubeShorts() {
 
   const renderVideo = useCallback(async () => {
     if (!scriptData) return;
-    setJob((prev) => ({ ...prev, status: 'uploading', message: 'Rendering video preview...' }));
+    setJob((prev) => ({ ...prev, status: 'uploading', message: 'Rendering MP4 video via ffmpeg...' }));
     try {
       const res = await fetch('/api/studio/youtube', {
         method: 'POST',
@@ -174,7 +174,7 @@ export function YouTubeShorts() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setJob({ status: 'complete', message: `Video preview ready! (${data.duration}s) — Screen-record for MP4`, videoUrl: data.videoUrl });
+        setJob({ status: 'complete', message: `MP4 video rendered! (${data.duration}s)`, videoUrl: data.videoUrl });
       } else {
         setJob({ status: 'error', message: data.error || 'Video render failed' });
       }
@@ -299,18 +299,17 @@ export function YouTubeShorts() {
             disabled={job.status === 'uploading'}
             className="px-5 py-2.5 rounded font-mono text-sm font-semibold bg-green-600 text-white hover:bg-green-500 transition-colors"
           >
-            {job.status === 'uploading' ? 'Rendering...' : 'Render Preview'}
+            {job.status === 'uploading' ? 'Rendering...' : 'Render Video (MP4)'}
           </button>
         )}
 
         {job.videoUrl && (
           <a
             href={job.videoUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+            download
             className="px-5 py-2.5 rounded font-mono text-sm font-semibold bg-blue-600 text-white hover:bg-blue-500 transition-colors inline-flex items-center gap-2"
           >
-            Open Preview ↗
+            Download MP4 ↓
           </a>
         )}
 
@@ -349,30 +348,29 @@ export function YouTubeShorts() {
         </div>
       )}
 
-      {/* Video Preview */}
+      {/* Video Player */}
       {job.videoUrl && (
         <div className="rounded border border-gray-700 bg-gray-900/50 p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-white">Video Preview</h3>
+            <h3 className="text-sm font-semibold text-white">Rendered Video</h3>
             <a
               href={job.videoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              download
               className="text-[10px] font-mono text-btc-orange hover:text-btc-orange/80 transition-colors"
             >
-              Open Full Screen ↗
+              Download MP4 ↓
             </a>
           </div>
           <div className="flex justify-center">
-            <iframe
+            <video
               src={job.videoUrl}
+              controls
               className="rounded border border-gray-700"
-              style={{ width: '270px', height: '480px' }}
-              title="Video Preview"
+              style={{ width: '270px', height: '480px', backgroundColor: '#0a0a0a' }}
             />
           </div>
           <p className="text-[10px] text-gray-500 mt-2 text-center">
-            Click Play in the preview, then screen-record for MP4 output
+            Real MP4 video — download or right-click to save
           </p>
         </div>
       )}
