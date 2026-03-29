@@ -293,7 +293,7 @@ export function YouTubeShorts() {
           {job.status === 'generating' ? 'Generating...' : 'Generate Short'}
         </button>
 
-        {job.status === 'complete' && scriptData && (scriptData.title || scriptData.script) && (
+        {(job.status === 'complete' || job.status === 'uploading') && scriptData && (scriptData.title || scriptData.script) && (
           <button
             onClick={renderVideo}
             disabled={job.status === 'uploading'}
