@@ -3,7 +3,7 @@
  * POST /api/studio/youtube — Generate a YouTube Short script + render MP4 video
  * GET  /api/studio/youtube — Get status
  *
- * Render pipeline: Python/Pillow generates text frames → ffmpeg encodes MP4
+ * Render pipeline: Python/Pillow generates text frames + TTS audio → ffmpeg encodes MP4
  */
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
@@ -25,7 +25,7 @@ export async function GET() {
     status: "ready",
     service: "youtube-shorts-studio",
     capabilities: ["generate", "render"],
-    render_engine: "pillow+ffmpeg",
+    render_engine: "pillow+ffmpeg+tts",
   });
 }
 
@@ -48,8 +48,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleGenerate(body: { topic?: string; style?: string }) {
-  const { topic, style } = body;
+async function handleGenerate(body: { topic?: string; niche?: string; style?: string }) {
+  const topic = body.topic || body.niche;
+  const style = body.style;
   if (!topic) {
     return NextResponse.json({ error: "Topic is required" }, { status: 400 });
   }
@@ -93,16 +94,23 @@ Return ONLY valid JSON (no markdown, no code fences):
 
   return NextResponse.json({
     success: true,
-    script: scriptData,
+    title: scriptData.title,
+    hook: scriptData.hook,
+    script: scriptData.script,
+    cta: scriptData.cta,
+    tags: Array.isArray(scriptData.hashtags) ? scriptData.hashtags.join(", ") : scriptData.hashtags,
+    description: scriptData.description || "",
+    estimatedDuration: scriptData.estimatedDuration || 45,
     model: "claude-sonnet-4-20250514",
   });
 }
 
 async function handleRender(body: {
-  script?: { title?: string; hook?: string; script?: string; cta?: string; estimatedDuration?: number };
+  title?: string; hook?: string; script?: string; cta?: string; estimatedDuration?: number;
 }) {
-  const { script } = body;
-  if (!script) {
+  const { title: scriptTitle = "", hook: scriptHook = "", script: scriptNarration = "", cta: scriptCta = "" } = body;
+
+  if (!scriptTitle && !scriptHook && !scriptNarration) {
     return NextResponse.json({ error: "Script data is required" }, { status: 400 });
   }
 
@@ -116,22 +124,31 @@ async function handleRender(body: {
   await mkdir(framesDir, { recursive: true });
   await mkdir(outputDir, { recursive: true });
 
-  const duration = script.estimatedDuration || 45;
-  const title = (script.title || "").replace(/'/g, "\\'").replace(/"/g, '\\"');
-  const hook = (script.hook || "").replace(/'/g, "\\'").replace(/"/g, '\\"');
-  const narration = (script.script || "").replace(/'/g, "\\'").replace(/"/g, '\\"');
-  const cta = (script.cta || "").replace(/'/g, "\\'").replace(/"/g, '\\"');
+  const duration = body.estimatedDuration || 45;
+  const title = scriptTitle.replace(/'/g, "\\'").replace(/"/g, '\\"');
+  const hook = scriptHook.replace(/'/g, "\\'").replace(/"/g, '\\"');
+  const narration = scriptNarration.replace(/'/g, "\\'").replace(/"/g, '\\"');
+  const cta = scriptCta.replace(/'/g, "\\'").replace(/"/g, '\\"');
 
-  // Step 1: Generate frames with Python/Pillow
-  const pyCmd = `python3 "${pythonScript}" --out-dir "${framesDir}" --title "${title}" --hook "${hook}" --script "${narration}" --cta "${cta}" --duration ${duration}`;
+  // Single Python call: generates frames, TTS audio, and encodes MP4
+  const pyCmd = [
+    `python3 "${pythonScript}"`,
+    `--out-dir "${framesDir}"`,
+    `--title "${title}"`,
+    `--hook "${hook}"`,
+    `--script "${narration}"`,
+    `--cta "${cta}"`,
+    `--duration ${duration}`,
+    `--mp4 "${outputFile}"`,
+  ].join(" ");
 
   let pyResult;
   try {
-    pyResult = await execAsync(pyCmd, { timeout: 60000, maxBuffer: 1024 * 1024 });
+    pyResult = await execAsync(pyCmd, { timeout: 180000, maxBuffer: 2 * 1024 * 1024 });
   } catch (pyErr: unknown) {
     const stderr = pyErr instanceof Error && "stderr" in pyErr ? (pyErr as { stderr: string }).stderr : String(pyErr);
     return NextResponse.json(
-      { error: "Frame generation failed", details: stderr.slice(-600) },
+      { error: "Video render failed", details: stderr.slice(-800) },
       { status: 500 }
     );
   }
@@ -139,47 +156,27 @@ async function handleRender(body: {
   const pyOut = pyResult.stdout.trim();
   if (!pyOut.startsWith("OK:")) {
     return NextResponse.json(
-      { error: "Frame generation failed", details: pyOut + "\n" + pyResult.stderr.slice(-400) },
+      { error: "Video render failed", details: pyOut + "\n" + pyResult.stderr.slice(-600) },
       { status: 500 }
     );
   }
 
-  // Step 2: Encode frames to MP4 with ffmpeg concat demuxer
-  const concatFile = path.join(framesDir, "concat.txt");
-  const ffCmd = [
-    "ffmpeg -y",
-    `-f concat -safe 0 -i "${concatFile}"`,
-    "-vf fps=25",
-    "-c:v libx264 -preset ultrafast -tune stillimage",
-    "-pix_fmt yuv420p",
-    `-t ${duration}`,
-    `"${outputFile}"`,
-  ].join(" ");
-
-  let ffResult;
-  try {
-    ffResult = await execAsync(ffCmd, { timeout: 120000, maxBuffer: 2 * 1024 * 1024 });
-  } catch (ffErr: unknown) {
-    const stderr = ffErr instanceof Error && "stderr" in ffErr ? (ffErr as { stderr: string }).stderr : String(ffErr);
-    return NextResponse.json(
-      { error: "ffmpeg encoding failed", details: stderr.slice(-600) },
-      { status: 500 }
-    );
-  }
-
-  // Cleanup frames
+  // Cleanup frames dir
   try {
     await rm(framesDir, { recursive: true, force: true });
   } catch {
     // ignore cleanup errors
   }
 
+  const hasAudio = pyOut.includes("audio=yes");
   const videoUrl = `/studio/output/short_${ts}.mp4`;
 
   return NextResponse.json({
     success: true,
     videoUrl,
+    duration,
+    hasAudio,
     framesGenerated: pyOut,
-    message: "MP4 rendered successfully",
+    message: hasAudio ? `MP4 rendered with voiceover (${duration}s)` : `MP4 rendered (${duration}s)`,
   });
 }
