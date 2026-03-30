@@ -95,9 +95,9 @@ const gradeColor: Record<string, string> = {
 };
 
 const statusIcon: Record<string, string> = {
-  completed: '●',
-  failed: '✕',
-  skipped: '○',
+  completed: 'â',
+  failed: 'â',
+  skipped: 'â',
 };
 
 const statusColor: Record<string, string> = {
@@ -115,7 +115,10 @@ export function DailyOps() {
   const [history, setHistory] = useState<OpsSummary[]>([]);
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [tab, setTab] = useState<'tasks' | 'report' | 'history'>('tasks');
+  const [runningTask, setRunningTask] = useState<number | null>(null);
+  const [taskResults, setTaskResults] = useState<Record<number, OpsResult>>({});
 
+  // Fetch task preview
   const loadPreview = useCallback(async () => {
     try {
       const res = await fetch(`/api/ops-route?type=${opsType}`);
@@ -132,11 +135,13 @@ export function DailyOps() {
     loadPreview();
   }, [loadPreview]);
 
+  // Execute ops
   const runOps = useCallback(async () => {
     setRunning(true);
     setProgress(`Starting ${opsType} operations...`);
     setTab('report');
     setReport(null);
+    setTaskResults({});
     try {
       const res = await fetch('/api/ops-route', {
         method: 'POST',
@@ -157,6 +162,44 @@ export function DailyOps() {
       setRunning(false);
     }
   }, [opsType]);
+
+  // Execute a single task by index
+  const runSingleTask = useCallback(async (index: number) => {
+    setRunningTask(index);
+    try {
+      const res = await fetch('/api/ops-route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: opsType, taskIndex: index }),
+      });
+      const data = await res.json();
+      if (res.ok && data.result) {
+        setTaskResults((prev) => ({ ...prev, [index]: data.result }));
+      } else {
+        setTaskResults((prev) => ({
+          ...prev,
+          [index]: {
+            agent_id: '', agent_name: '', task_title: preview?.tasks[index]?.title || '',
+            status: 'failed' as const, priority: '', risk_level: '', risk_score: 0,
+            category: '', elapsed_ms: 0, cost: '$0.00',
+            summary: data.error || 'Unknown error', error: data.error,
+          },
+        }));
+      }
+    } catch (err: any) {
+      setTaskResults((prev) => ({
+        ...prev,
+        [index]: {
+          agent_id: '', agent_name: '', task_title: preview?.tasks[index]?.title || '',
+          status: 'failed' as const, priority: '', risk_level: '', risk_score: 0,
+          category: '', elapsed_ms: 0, cost: '$0.00',
+          summary: `Network error: ${err.message}`, error: err.message,
+        },
+      }));
+    } finally {
+      setRunningTask(null);
+    }
+  }, [opsType, preview]);
 
   const formatMs = (ms: number) => {
     if (ms < 1000) return `${ms}ms`;
@@ -236,13 +279,14 @@ export function DailyOps() {
         ))}
       </div>
 
-      {/* Task Queue Tab */}
+      {/* ââ Task Queue Tab ââ */}
       {tab === 'tasks' && (
         <div className="space-y-4">
+          {/* Run button + cost estimate */}
           <div className="flex items-center justify-between">
             <div className="text-[11px] font-mono text-gray-500">
               {preview
-                ? `${preview.total} tasks · Est. cost: $${preview.estimated_total_cost}`
+                ? `${preview.total} tasks Â· Est. cost: $${preview.estimated_total_cost}`
                 : 'Loading tasks...'}
             </div>
             <button
@@ -273,36 +317,86 @@ export function DailyOps() {
             </div>
           )}
 
-          {preview?.tasks.map((task, i) => (
-            <div
-              key={i}
-              className="rounded border border-gray-800 bg-gray-900/50 p-4 space-y-2"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={cn('text-[10px] font-mono px-2 py-0.5 rounded border', priorityColor[task.priority])}>
-                      {task.priority.toUpperCase()}
-                    </span>
-                    <span className={cn('text-[10px] font-mono', riskColor[task.risk_level])}>
-                      Risk: {task.risk_score}/10
-                    </span>
-                    <span className="text-[10px] font-mono text-gray-600">{task.category}</span>
+          {/* Task list */}
+          {preview?.tasks.map((task, i) => {
+            const result = taskResults[i];
+            const isRunning = runningTask === i;
+            return (
+              <div
+                key={i}
+                className={cn(
+                  'rounded border bg-gray-900/50 p-4 space-y-2 transition-colors',
+                  result?.status === 'completed' ? 'border-green-800/60' :
+                  result?.status === 'failed' ? 'border-red-800/60' :
+                  isRunning ? 'border-btc-orange/50' : 'border-gray-800'
+                )}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={cn('text-[10px] font-mono px-2 py-0.5 rounded border', priorityColor[task.priority])}>
+                        {task.priority.toUpperCase()}
+                      </span>
+                      <span className={cn('text-[10px] font-mono', riskColor[task.risk_level])}>
+                        Risk: {task.risk_score}/10
+                      </span>
+                      <span className="text-[10px] font-mono text-gray-600">{task.category}</span>
+                      {result && (
+                        <span className={cn('text-[10px] font-mono font-semibold', statusColor[result.status])}>
+                          {statusIcon[result.status]} {result.status.toUpperCase()}
+                          {result.elapsed_ms > 0 && ` Â· ${formatMs(result.elapsed_ms)}`}
+                          {result.cost !== '$0.00' && result.cost !== '$0.0000' && ` Â· ${result.cost}`}
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="text-sm font-semibold text-white">{task.title}</h4>
+                    <p className="text-[11px] text-gray-400 mt-0.5">{task.description}</p>
                   </div>
-                  <h4 className="text-sm font-semibold text-white">{task.title}</h4>
-                  <p className="text-[11px] text-gray-400 mt-0.5">{task.description}</p>
+                  <div className="text-right ml-4 shrink-0 flex flex-col items-end gap-1.5">
+                    <p className="text-[10px] font-mono text-gray-500">{task.agent_name}</p>
+                    <p className="text-[10px] font-mono text-btc-orange">{task.estimated_cost}</p>
+                    <button
+                      onClick={() => runSingleTask(i)}
+                      disabled={isRunning || running}
+                      className={cn(
+                        'mt-1 px-3 py-1 rounded font-mono text-[10px] font-semibold transition-colors',
+                        isRunning
+                          ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                          : result?.status === 'completed'
+                          ? 'bg-green-900/40 text-green-400 hover:bg-green-900/60 border border-green-700/50'
+                          : result?.status === 'failed'
+                          ? 'bg-red-900/40 text-red-400 hover:bg-red-900/60 border border-red-700/50'
+                          : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white border border-gray-700'
+                      )}
+                    >
+                      {isRunning ? (
+                        <span className="flex items-center gap-1">
+                          <span className="w-2.5 h-2.5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+                          Running...
+                        </span>
+                      ) : result ? 'Re-run' : 'Run'}
+                    </button>
+                  </div>
                 </div>
-                <div className="text-right ml-4 shrink-0">
-                  <p className="text-[10px] font-mono text-gray-500">{task.agent_name}</p>
-                  <p className="text-[10px] font-mono text-btc-orange mt-0.5">{task.estimated_cost}</p>
-                </div>
+                {/* Show result summary inline */}
+                {result && (
+                  <div className={cn(
+                    'mt-2 p-3 rounded text-xs font-mono border',
+                    result.status === 'completed'
+                      ? 'bg-green-900/10 border-green-800/40 text-green-300'
+                      : 'bg-red-900/10 border-red-800/40 text-red-300'
+                  )}>
+                    <p className="whitespace-pre-wrap leading-relaxed">{result.summary?.slice(0, 500)}</p>
+                    {result.error && <p className="text-red-400 mt-1">Error: {result.error}</p>}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Report Tab */}
+      {/* ââ Report Tab ââ */}
       {tab === 'report' && (
         <div className="space-y-4">
           {!report && !running && (
@@ -313,6 +407,7 @@ export function DailyOps() {
 
           {report && (
             <>
+              {/* Summary cards */}
               <div className="grid grid-cols-4 gap-3">
                 <div className="rounded border border-gray-800 bg-gray-900/50 p-3">
                   <p className="text-[10px] font-mono text-gray-500 uppercase">Tasks</p>
@@ -345,11 +440,13 @@ export function DailyOps() {
                 </div>
               </div>
 
+              {/* Risk summary */}
               <div className="rounded border border-gray-800 bg-gray-900/50 p-4">
                 <h4 className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-2">Risk Assessment</h4>
                 <p className="text-sm text-gray-300">{report.risk_assessment.risk_summary}</p>
               </div>
 
+              {/* Agent performance */}
               <div className="rounded border border-gray-800 bg-gray-900/50 p-4">
                 <h4 className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-3">Agent Performance</h4>
                 <div className="space-y-2">
@@ -362,7 +459,7 @@ export function DailyOps() {
                         <div>
                           <p className="text-sm text-white">{agent.agent_name}</p>
                           <p className="text-[10px] font-mono text-gray-500">
-                            {agent.tasks_completed}/{agent.tasks_run} tasks · {formatMs(agent.avg_elapsed_ms)} avg
+                            {agent.tasks_completed}/{agent.tasks_run} tasks Â· {formatMs(agent.avg_elapsed_ms)} avg
                           </p>
                         </div>
                       </div>
@@ -377,6 +474,7 @@ export function DailyOps() {
                 </div>
               </div>
 
+              {/* Task results */}
               <div className="rounded border border-gray-800 bg-gray-900/50 p-4">
                 <h4 className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-3">Task Results</h4>
                 <div className="space-y-2">
@@ -401,7 +499,7 @@ export function DailyOps() {
                       {expandedTask === result.task_title && (
                         <div className="ml-7 mt-1 mb-3 p-3 rounded bg-gray-800/50 border border-gray-700/50">
                           <p className="text-[10px] font-mono text-gray-500 mb-1">
-                            Agent: {result.agent_name} · Category: {result.category} · Risk: {result.risk_score}/10
+                            Agent: {result.agent_name} Â· Category: {result.category} Â· Risk: {result.risk_score}/10
                           </p>
                           <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed">
                             {result.summary}
@@ -416,13 +514,14 @@ export function DailyOps() {
                 </div>
               </div>
 
+              {/* Recommendations */}
               <div className="rounded border border-gray-800 bg-gray-900/50 p-4">
                 <h4 className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-3">Recommendations</h4>
                 <div className="space-y-2">
                   {report.recommendations.map((rec, i) => (
                     <div key={i} className="flex items-start gap-2">
-                      <span className="text-btc-orange text-xs mt-0.5">▸</span>
-                      <p className="text-xs text-gray-300">{rec}</p>
+                      <span className="text-btc-orange text-xs mt-0.5">â¸</span>
+                      <p className="text.xs text-gray-300">{rec}</p>
                     </div>
                   ))}
                 </div>
@@ -432,7 +531,7 @@ export function DailyOps() {
         </div>
       )}
 
-      {/* History Tab */}
+      {/* ââ History Tab ââ */}
       {tab === 'history' && (
         <div className="space-y-3">
           {history.length === 0 && (
@@ -467,6 +566,7 @@ export function DailyOps() {
                   <p className="text-[10px] font-mono text-gray-500">{formatMs(run.total_elapsed_ms)}</p>
                 </div>
               </div>
+              {/* Mini agent grades */}
               <div className="flex gap-1.5 mt-2">
                 {run.agent_performance.map((a) => (
                   <span
