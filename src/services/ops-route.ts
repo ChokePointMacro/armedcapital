@@ -164,7 +164,7 @@ async function executeOpsTask(task: OpsTask, supabase: any): Promise<OpsResult> 
     }
     return { agent_id: task.agent_id, agent_name: task.agent_name, task_title: task.title, status: 'failed', priority: task.priority, risk_level: task.risk_level, risk_score: task.risk_score, category: task.category, elapsed_ms: elapsed, cost, summary: 'HTTP ' + res.status, error: await res.text().catch(() => '') };
   } catch (err) {
-    return { agent_id: task.agent_id, agent_name: task.agent_name, task_title: task.title, status: 'failed', priority: task.priority, risk_level: task.risk_level, risk_score: task.risk_score, category: task.category, elapsed_ms: Date.now() - start, cost: '$0.00', summary: 'Error: ' + err.message, error: err.message };
+    return { agent_id: task.agent_id, agent_name: task.agent_name, task_title: task.title, status: 'failed', priority: task.priority, risk_level: task.risk_level, risk_score: task.risk_score, category: task.category, elapsed_ms: Date.now() - start, cost: '$0.00', summary: 'Error: ' + (err as Error).message, error: (err as Error).message };
   }
 }
 
