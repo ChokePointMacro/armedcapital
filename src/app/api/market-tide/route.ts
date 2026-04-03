@@ -89,7 +89,7 @@ interface MarketTideResponse {
 
 // ─── Ticker → Sector Mapping ──────────────────────────────────────────────────
 
-const TICKER_SECTORS: Record<string, string> = {
+const TICKER_SECTORS: Record<string, string | null> = {
   XLK: 'Technology',
   XLF: 'Finance',
   XLE: 'Energy',
