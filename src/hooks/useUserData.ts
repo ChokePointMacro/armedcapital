@@ -12,11 +12,20 @@ export function useUserData(): UserData | null {
 
   if (!user) return null;
 
+  const email = user.primaryEmailAddress?.emailAddress || '';
+  const username = user.username || email;
+  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || '';
+  const isAdmin = !!(adminEmail && (
+    username.toLowerCase() === adminEmail.toLowerCase() ||
+    email.toLowerCase() === adminEmail.toLowerCase()
+  ));
+
   return {
     id: user.id,
-    username: user.username || user.primaryEmailAddress?.emailAddress || '',
+    username,
     displayName: user.fullName || user.firstName || '',
     profileImage: user.imageUrl || '',
     authMethod: 'clerk' as const,
+    isAdmin,
   };
 }
