@@ -514,7 +514,7 @@ OUTPUT RULES:
   console.log('[generateSpeculationReport] Calling AI...');
   const aiResponse = await generateReportWithFallback(prompt, ['claude', 'gpt'], 9000);
   onProgress?.('Parsing AI response...', 85, specSources);
-  const parsed = parseJSONResponse<WeeklyReport>(aiResponse);
+  let parsed = normalizeWeeklyReport(parseJSONResponse<WeeklyReport>(aiResponse));
   const warnings: string[] = [...(aiResponse.warnings || [])];
 
   if (!parsed.headlines?.length) throw new Error('No headlines in speculation response');
@@ -548,6 +548,61 @@ function getTrendingWeightInstructions(type: string): string {
     default:
       return `\nTRENDING WEIGHT: Assign each headline a trendScore (1–100) based on recency, social volume, and strategic importance. Sort highest first.`;
   }
+}
+
+/**
+ * Normalize AI response structure — AI models sometimes wrap results in containers
+ * or use different key names. This extracts headlines/analysis from common patterns.
+ */
+function normalizeWeeklyReport(data: any): WeeklyReport {
+  // Already correct shape
+  if (Array.isArray(data.headlines) && data.headlines.length > 0) return data;
+
+  // Common wrapper patterns: { report: { headlines: [] } }, { data: { headlines: [] } }
+  for (const key of ['report', 'data', 'result', 'response', 'output']) {
+    if (data[key] && Array.isArray(data[key].headlines)) {
+      return { headlines: data[key].headlines, analysis: data[key].analysis || data.analysis };
+    }
+  }
+
+  // Alternative key names: items, news, stories, articles
+  for (const key of ['items', 'news', 'stories', 'articles', 'events']) {
+    if (Array.isArray(data[key]) && data[key].length > 0 && data[key][0]?.title) {
+      console.warn(`[normalizeWeeklyReport] Using alternate key "${key}" as headlines`);
+      return { headlines: data[key], analysis: data.analysis };
+    }
+  }
+
+  // Array at root level
+  if (Array.isArray(data) && data.length > 0 && data[0]?.title) {
+    console.warn('[normalizeWeeklyReport] Root-level array detected, wrapping as headlines');
+    return { headlines: data, analysis: { performanceRanking: '', verificationScore: 0, integrityScore: 0, overallSummary: '', globalSocialPost: '' } };
+  }
+
+  // Log top-level keys for debugging
+  console.error(`[normalizeWeeklyReport] Unrecognized structure. Keys: ${Object.keys(data).join(', ')}`);
+  return data;
+}
+
+function normalizeForecastReport(data: any): ForecastReport {
+  if (Array.isArray(data.events) && data.events.length > 0) return data;
+
+  for (const key of ['report', 'data', 'result', 'response', 'output', 'forecast']) {
+    if (data[key] && Array.isArray(data[key].events)) {
+      return { events: data[key].events, analysis: data[key].analysis || data.analysis };
+    }
+  }
+
+  // Alternative key names
+  for (const key of ['items', 'forecasts', 'predictions', 'catalysts']) {
+    if (Array.isArray(data[key]) && data[key].length > 0 && data[key][0]?.title) {
+      console.warn(`[normalizeForecastReport] Using alternate key "${key}" as events`);
+      return { events: data[key], analysis: data.analysis };
+    }
+  }
+
+  console.error(`[normalizeForecastReport] Unrecognized structure. Keys: ${Object.keys(data).join(', ')}`);
+  return data;
 }
 
 function validateHeadlines(headlines: Headline[]): void {
@@ -758,7 +813,7 @@ OUTPUT RULES:
     onProgress?.('Parsing AI response...', 85, sourceStatuses);
     console.log(`[generateWeeklyReport] Using provider: ${aiResponse.provider}`);
 
-    const parsed = parseJSONResponse<WeeklyReport>(aiResponse);
+    let parsed = normalizeWeeklyReport(parseJSONResponse<WeeklyReport>(aiResponse));
     const warnings: string[] = [...(aiResponse.warnings || [])];
 
     if (!parsed.headlines?.length) throw new Error("No headlines in response");
@@ -1067,7 +1122,7 @@ OUTPUT RULES:
   console.log('[parseReportWithAI] Generating forecast...');
   const aiResponse = await generateReportWithFallback(prompt, ['claude', 'gpt'], 10000);
   onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
-  const parsed = parseJSONResponse<ForecastReport>(aiResponse);
+  let parsed = normalizeForecastReport(parseJSONResponse<ForecastReport>(aiResponse));
   const warnings: string[] = [...(aiResponse.warnings || [])];
 
   if (!parsed.events?.length) throw new Error('No events in forecast response');
@@ -1133,7 +1188,7 @@ OUTPUT RULES:
   onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
   const aiResponse = await generateReportWithFallback(prompt, ['claude', 'gpt'], 9000);
   onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
-  const parsed = parseJSONResponse<WeeklyReport>(aiResponse);
+  let parsed = normalizeWeeklyReport(parseJSONResponse<WeeklyReport>(aiResponse));
   const warnings: string[] = [...(aiResponse.warnings || [])];
 
   if (!parsed.headlines?.length) throw new Error('No headlines in speculation response');
@@ -1247,8 +1302,12 @@ OUTPUT RULES:
   const aiResponse = await generateReportWithFallback(prompt, ["claude", "gpt"], cfg.maxTokens);
   onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
 
-  const parsed = parseJSONResponse<WeeklyReport>(aiResponse);
+  let parsed = parseJSONResponse<WeeklyReport>(aiResponse);
   const warnings: string[] = [...(aiResponse.warnings || [])];
+
+  // Normalize structure — AI sometimes wraps in a container object
+  parsed = normalizeWeeklyReport(parsed);
+  console.log(`[parseReportWithAI] Parsed keys: ${Object.keys(parsed).join(', ')}, headlines: ${parsed.headlines?.length ?? 'none'}`);
 
   if (!parsed.headlines?.length) throw new Error("No headlines in response");
   if (parsed.headlines.length < 20) warnings.push(`Only ${parsed.headlines.length}/20 headlines generated.`);
