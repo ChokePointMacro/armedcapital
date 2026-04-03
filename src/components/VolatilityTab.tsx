@@ -6,6 +6,25 @@ import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
+function StatCard({ label, value, suffix, color }: { label: string; value: string; suffix?: string; color?: string }) {
+  const colorMap: Record<string, string> = {
+    'btc-orange': 'text-btc-orange',
+    blue: 'text-blue-400',
+    green: 'text-green-400',
+    cyan: 'text-cyan-400',
+    purple: 'text-purple-400',
+    red: 'text-red-400',
+  };
+  return (
+    <div className="bg-black/30 border border-gray-800 rounded p-3">
+      <p className="text-[10px] font-mono text-gray-500 uppercase tracking-wider">{label}</p>
+      <p className={cn('text-lg font-mono font-bold mt-1', colorMap[color || ''] || 'text-white')}>
+        {value}{suffix}
+      </p>
+    </div>
+  );
+}
+
 interface TermStructureItem {
   expiry: string;
   daysToExpiry: number;
