@@ -87,7 +87,13 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const report = await parseReportWithAI(snapshot);
+        const retryTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('PHASE2_TIMEOUT')), 110_000)
+        );
+        const report = await Promise.race([
+          parseReportWithAI(snapshot),
+          retryTimeout,
+        ]);
         await markSnapshotParsed(body.snapshotId, 'retry');
         return NextResponse.json(report);
       } catch (aiError) {
@@ -95,8 +101,10 @@ export async function POST(request: NextRequest) {
         console.error('[API] Retry parse failed:', msg);
         return NextResponse.json(
           {
-            error: 'AI parsing failed on retry. Please try again.',
-            type: 'AI_PARSE_FAILED',
+            error: msg === 'PHASE2_TIMEOUT'
+              ? 'AI timed out on retry. Your data is still saved — try again.'
+              : 'AI parsing failed on retry. Please try again.',
+            type: msg === 'PHASE2_TIMEOUT' ? 'TIMEOUT' : 'AI_PARSE_FAILED',
             snapshotId: body.snapshotId,
             retryable: true,
             details: msg.substring(0, 200),
@@ -126,10 +134,17 @@ export async function POST(request: NextRequest) {
     };
 
     // ── PHASE 1: Fetch all data (RSS + enrichment) ──
-    // This is the part that should never be lost
+    // Budget: 30s max — individual fetches have 5-10s timeouts already
+    const PHASE1_TIMEOUT_MS = 30_000;
     let snapshot: ReportDataSnapshot;
     try {
-      snapshot = await fetchReportData(type, customTopic, logProgress);
+      const phase1Timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Data fetch timed out after 30s')), PHASE1_TIMEOUT_MS)
+      );
+      snapshot = await Promise.race([
+        fetchReportData(type, customTopic, logProgress),
+        phase1Timeout,
+      ]);
     } catch (fetchError) {
       const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
       console.error('[API] Phase 1 (data fetch) failed:', msg);
@@ -147,10 +162,20 @@ export async function POST(request: NextRequest) {
       console.warn('[API] Snapshot save failed — continuing without persistence');
     }
 
-    // ── PHASE 2: AI parsing ──
-    console.log(`[API] Phase 2: AI parsing for ${type} report...`);
+    // ── PHASE 2: AI parsing (with safety timeout) ──
+    // Must finish before Vercel's 120s hard kill — leave 10s buffer
+    const PHASE2_TIMEOUT_MS = 95_000;
+    console.log(`[API] Phase 2: AI parsing for ${type} report (${PHASE2_TIMEOUT_MS / 1000}s budget)...`);
+
+    const phase2Timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('PHASE2_TIMEOUT')), PHASE2_TIMEOUT_MS)
+    );
+
     try {
-      const report = await parseReportWithAI(snapshot, logProgress);
+      const report = await Promise.race([
+        parseReportWithAI(snapshot, logProgress),
+        phase2Timeout,
+      ]);
 
       if (snapshotId) {
         await markSnapshotParsed(snapshotId, 'success');
@@ -186,7 +211,11 @@ export async function POST(request: NextRequest) {
       let statusCode = 502;
       let userMessage = `AI parsing failed: ${msg.substring(0, 150)}`;
 
-      if (msg.includes('rate limit') || msg.includes('429') || msg.includes('quota')) {
+      if (msg === 'PHASE2_TIMEOUT') {
+        errorType = 'TIMEOUT';
+        statusCode = 504;
+        userMessage = 'AI generation timed out, but your data is saved. Hit "Retry AI Parse" to try again without re-fetching.';
+      } else if (msg.includes('rate limit') || msg.includes('429') || msg.includes('quota')) {
         errorType = 'RATE_LIMIT';
         statusCode = 429;
         userMessage = 'Rate limit reached. Your data is saved — retry in a moment.';

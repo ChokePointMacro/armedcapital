@@ -240,7 +240,15 @@ export const Dashboard = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        let errorData: any = {};
+        try {
+          errorData = await response.json();
+        } catch {
+          // Vercel 504 returns HTML, not JSON
+          throw new Error(response.status === 504
+            ? 'Report generation timed out. The server took too long — please try again.'
+            : `API error: ${response.status}`);
+        }
         if (errorData.retryable && errorData.snapshotId) {
           setRetrySnapshotId(errorData.snapshotId);
         }
