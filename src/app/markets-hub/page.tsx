@@ -6,6 +6,7 @@ import { Markets } from '@/components/Markets';
 import { MarketTide } from '@/components/MarketTide';
 import { TradeFlow } from '@/components/TradeFlow';
 import { OptionsFlow } from '@/components/OptionsFlow';
+import { DarkPool } from '@/components/DarkPool';
 import { useUserData } from '@/hooks/useUserData';
 import { TrendingUp, Activity, Waves } from 'lucide-react';
 
@@ -14,6 +15,7 @@ const SUB_TABS = [
   { key: 'market-tide', label: 'Market Tide', icon: <Activity size={12} /> },
   { key: 'trade-flow', label: 'Crypto Flow', icon: <Waves size={12} /> },
   { key: 'options-flow', label: 'Options Flow', icon: <Waves size={12} />, badge: 'LIVE' },
+  { key: 'dark-pool', label: 'Dark Pool', icon: <Waves size={12} />, badge: 'NEW' },
 ] as const;
 
 type SubTab = typeof SUB_TABS[number]['key'];
@@ -38,7 +40,11 @@ export default function MarketsHubPage() {
           >
             {st.icon} {st.label}
             {st.badge && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 bg-btc-orange/20 text-btc-orange rounded">
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                st.badge === 'NEW'
+                  ? 'bg-purple-500/20 text-purple-400'
+                  : 'bg-btc-orange/20 text-btc-orange'
+              }`}>
                 {st.badge}
               </span>
             )}
@@ -50,6 +56,7 @@ export default function MarketsHubPage() {
       {tab === 'market-tide' && <MarketTide />}
       {tab === 'trade-flow' && <TradeFlow />}
       {tab === 'options-flow' && <OptionsFlow />}
+      {tab === 'dark-pool' && <DarkPool />}
     </Layout>
   );
 }
