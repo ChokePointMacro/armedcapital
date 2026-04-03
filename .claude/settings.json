@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": ["src/**", "tests/**", "docs/**", "scripts/**", "tradingbot/**"],
+    "deny": [".env", "node_modules/**"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "book",
+        "hooks": [
+          { "type": "command", "command": "echo 'Pre-tool check passed'" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "write",
+        "hooks": [
+          { "type": "command", "command": "echo 'Post-write hook: remember to test'" }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "MAX_THINKING_TOKENS": "10000"
+  }
+}

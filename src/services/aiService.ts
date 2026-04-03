@@ -1,0 +1,387 @@
+import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
+
+export interface AIResponse {
+  content: string;
+  provider: "gemini" | "gpt" | "claude";
+  model: string;
+  warnings?: string[];
+}
+
+export interface ReportRequest {
+  type: "global" | "crypto" | "equities" | "conspiracies";
+  topicFocus: string;
+  reportTitle: string;
+}
+
+// Initialize providers
+function getGeminiAI() {
+  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+}
+
+function getOpenAI() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
+}
+
+function getAnthropic() {
+  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" });
+}
+
+/**
+ * Generate content using multi-provider AI with automatic fallback
+ * Tries providers in order: Gemini → Claude → GPT
+ * Also retries with different providers if JSON parsing fails
+ */
+export async function generateReportWithFallback(
+  prompt: string,
+  providers: Array<"gemini" | "claude" | "gpt"> = ["claude", "gemini", "gpt"],
+  maxTokens = 16000
+): Promise<AIResponse> {
+  const errors: Array<{ provider: string; error: string }> = [];
+  const rateLimitErrors: string[] = [];
+
+  for (const provider of providers) {
+    try {
+      console.log(`[AI Service] Attempting ${provider}...`);
+
+      let response: AIResponse;
+      if (provider === "gemini") {
+        response = await generateWithGemini(prompt);
+      } else if (provider === "claude") {
+        response = await generateWithClaude(prompt, maxTokens);
+      } else if (provider === "gpt") {
+        response = await generateWithGPT(prompt, maxTokens);
+      } else {
+        continue;
+      }
+
+      console.log(`[AI Service] ✓ ${provider} succeeded (got response)`);
+      
+      // Try to parse JSON - if it fails, treat as recoverable error and try next provider
+      try {
+        parseJSONResponse(response);
+        console.log(`[AI Service] ✓ ${provider} JSON parsed successfully`);
+        return response;
+      } catch (parseError) {
+        const parseMsg = parseError instanceof Error ? parseError.message : String(parseError);
+        console.error(`[AI Service] ${provider} JSON parse failed: ${parseMsg}`);
+        errors.push({ provider, error: `JSON parse failed: ${parseMsg}` });
+        // Continue to next provider
+        continue;
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      
+      // Check for rate limit errors
+      if (
+        errorMsg.includes("rate limit") ||
+        errorMsg.includes("Rate limit") ||
+        errorMsg.includes("429") ||
+        errorMsg.includes("quota") ||
+        errorMsg.includes("Quota")
+      ) {
+        const rateLimitMsg = `${provider} rate limit: ${errorMsg}`;
+        rateLimitErrors.push(rateLimitMsg);
+        console.error(`[AI Service] ⚠️  ${rateLimitMsg}`);
+      } else {
+        console.error(`[AI Service] ✗ ${provider} failed:`, errorMsg);
+      }
+      
+      errors.push({ provider, error: errorMsg });
+    }
+  }
+
+  // All providers failed - construct detailed error message
+  let errorMessage = "All AI providers failed.";
+  
+  if (rateLimitErrors.length > 0) {
+    errorMessage = `Rate limit errors: ${rateLimitErrors.join(" | ")}`;
+  } else {
+    const errorDetails = errors
+      .map((e) => `${e.provider}: ${e.error}`)
+      .join(" | ");
+    errorMessage = `All AI providers failed: ${errorDetails}`;
+  }
+  
+  throw new Error(errorMessage);
+}
+
+// Provider-specific implementations
+
+async function generateWithGemini(prompt: string): Promise<AIResponse> {
+  const ai = getGeminiAI();
+  // Try available models in order of preference
+  const modelsToTry = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-pro"];
+  
+  for (const model of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: [{ parts: [{ text: prompt }], role: "user" }],
+        config: {
+          systemInstruction: "You are a professional analyst. Return ONLY valid JSON with no additional text or markdown.",
+          responseMimeType: "application/json",
+        },
+      });
+
+      const content = response.text || "";
+      if (!content) throw new Error("Empty response from Gemini");
+
+      return {
+        content,
+        provider: "gemini",
+        model,
+      };
+    } catch (error) {
+      console.warn(`[AI Service] Gemini model ${model} failed, trying next...`);
+      if (model === modelsToTry[modelsToTry.length - 1]) {
+        // Last model failed, re-throw
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("No available Gemini models");
+}
+
+async function generateWithClaude(prompt: string, maxTokens = 16000): Promise<AIResponse> {
+  const client = getAnthropic();
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: maxTokens,
+    messages: [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ],
+    system: "You are a professional analyst. Return ONLY valid JSON with no additional text or markdown.",
+  });
+
+  const content =
+    response.content[0].type === "text" ? response.content[0].text : "";
+  if (!content) throw new Error("Empty response from Claude");
+
+  const warnings: string[] = [];
+  if (response.stop_reason === "max_tokens") {
+    console.warn("[generateWithClaude] WARNING: Response truncated at max_tokens limit — attempting salvage");
+    warnings.push("Claude response was truncated at token limit. Some headlines or analysis may be missing.");
+  }
+
+  return {
+    content,
+    provider: "claude",
+    model: "claude-sonnet-4-6",
+    warnings: warnings.length ? warnings : undefined,
+  };
+}
+
+async function generateWithGPT(prompt: string, maxTokens = 8000): Promise<AIResponse> {
+  const client = getOpenAI();
+
+  const response = await client.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a professional analyst. Return ONLY valid JSON - no markdown, no backticks, no explanations. Start with { and end with }. Do not wrap in code blocks or add any text before or after the JSON.",
+      },
+      {
+        role: "user",
+        content: prompt + "\n\nRETURN ONLY JSON - NO MARKDOWN - NO CODE BLOCKS - START WITH { AND END WITH }",
+      },
+    ],
+    max_tokens: Math.min(maxTokens, 16000), // GPT-4o max completion tokens is 16384
+  });
+
+  const content = response.choices[0].message.content || "";
+  if (!content) throw new Error("Empty response from GPT");
+
+  const warnings: string[] = [];
+  if (response.choices[0].finish_reason === "length") {
+    console.warn("[generateWithGPT] WARNING: Response truncated — attempting salvage");
+    warnings.push("GPT response was truncated at token limit. Some headlines or analysis may be missing.");
+  }
+
+  return {
+    content,
+    provider: "gpt",
+    model: "gpt-4o",
+    warnings: warnings.length ? warnings : undefined,
+  };
+}
+
+/**
+ * Parse JSON response from any provider with robust error recovery
+ */
+export function parseJSONResponse<T>(response: AIResponse): T {
+  try {
+    let jsonText = response.content.trim();
+    
+    // Step 1: Remove markdown code blocks
+    jsonText = jsonText.replace(/^```(?:json|JSON)?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
+    jsonText = jsonText.trim();
+    
+    // Step 2: Try parsing directly
+    try {
+      return JSON.parse(jsonText);
+    } catch (e) {
+      // Silently fail direct parse, fall through to extraction
+    }
+    
+    // Step 3: Simple extraction - find first { or [ and last } or ]
+    let jsonStart = -1;
+    let jsonEnd = -1;
+    
+    // Find start
+    const firstBrace = jsonText.indexOf("{");
+    const firstBracket = jsonText.indexOf("[");
+    
+    if (firstBrace === -1 && firstBracket === -1) {
+      throw new Error("No JSON structure found in response");
+    }
+    
+    if (firstBrace === -1) {
+      jsonStart = firstBracket;
+    } else if (firstBracket === -1) {
+      jsonStart = firstBrace;
+    } else {
+      jsonStart = Math.min(firstBrace, firstBracket);
+    }
+    
+    // Find end - work backwards looking for matching closing bracket
+    let balance = 0;
+    let inString = false;
+    let escaped = false;
+    
+    for (let i = jsonStart; i < jsonText.length; i++) {
+      const char = jsonText[i];
+      
+      if (char === "\\" && !escaped) {
+        escaped = true;
+        continue;
+      }
+      
+      if (char === '"' && !escaped) {
+        inString = !inString;
+        escaped = false;
+        continue;
+      }
+      
+      escaped = false;
+      
+      if (!inString) {
+        if (char === "{" || char === "[") {
+          balance++;
+        } else if (char === "}" || char === "]") {
+          balance--;
+          if (balance === 0) {
+            jsonEnd = i + 1;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (jsonEnd === -1) {
+      // Truncated response — try to repair by closing open brackets
+      console.warn("[parseJSON] Truncated JSON detected — attempting repair");
+      let repaired = jsonText.substring(jsonStart);
+      // Close any open string
+      let inStr = false;
+      let esc = false;
+      for (let i = 0; i < repaired.length; i++) {
+        if (repaired[i] === '\\' && !esc) { esc = true; continue; }
+        if (repaired[i] === '"' && !esc) inStr = !inStr;
+        esc = false;
+      }
+      if (inStr) repaired += '"';
+      // Remove trailing comma/incomplete value
+      repaired = repaired.replace(/,\s*"[^"]*$/, '').replace(/,\s*$/, '');
+      // Close open brackets
+      const stack: string[] = [];
+      let inStr2 = false; let esc2 = false;
+      for (const ch of repaired) {
+        if (ch === '\\' && !esc2) { esc2 = true; continue; }
+        if (ch === '"' && !esc2) { inStr2 = !inStr2; esc2 = false; continue; }
+        esc2 = false;
+        if (!inStr2) {
+          if (ch === '{') stack.push('}');
+          else if (ch === '[') stack.push(']');
+          else if (ch === '}' || ch === ']') stack.pop();
+        }
+      }
+      repaired += stack.reverse().join('');
+      try {
+        return JSON.parse(repaired);
+      } catch {
+        throw new Error("Truncated JSON could not be repaired");
+      }
+    }
+
+    let extracted = jsonText.substring(jsonStart, jsonEnd);
+    
+    // Step 4: Fix unescaped newlines in string values
+    let fixed = "";
+    inString = false;
+    escaped = false;
+    
+    for (let i = 0; i < extracted.length; i++) {
+      const char = extracted[i];
+      
+      if (char === "\\" && !escaped) {
+        escaped = true;
+        fixed += char;
+        continue;
+      }
+      
+      if (char === '"' && !escaped) {
+        inString = !inString;
+        fixed += char;
+        escaped = false;
+        continue;
+      }
+      
+      if ((char === "\n" || char === "\r") && inString && !escaped) {
+        fixed += "\\n";
+        escaped = false;
+        continue;
+      }
+      
+      fixed += char;
+      escaped = false;
+    }
+    
+    // Step 5: Try parsing with newlines fixed
+    try {
+      return JSON.parse(fixed);
+    } catch (e) {
+      // Continue to next fix strategy
+    }
+    
+    // Step 6: Remove trailing commas
+    fixed = fixed.replace(/,(\s*[}\]])/g, "$1");
+    
+    try {
+      return JSON.parse(fixed);
+    } catch (e) {
+      // Continue to next fix strategy
+    }
+    
+    // Step 7: Final attempt - remove any non-printable/control characters except newlines
+    fixed = fixed.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+    
+    try {
+      return JSON.parse(fixed);
+    } catch (e) {
+      const parseErr = e instanceof Error ? e.message : String(e);
+      throw new Error(`Could not parse JSON: ${parseErr.substring(0, 100)}`);
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(`JSON parse failed from ${response.provider}: ${errorMsg}`);
+  }
+}
