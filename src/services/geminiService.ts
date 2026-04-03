@@ -488,27 +488,34 @@ PRIORITY RANKING — weight by:
 3. Cross-subreddit confirmation (same rumour appearing in multiple subs = higher weight)
 4. Recency (last 48h scores highest)
 
-HEADLINE FIELDS (repeat for all 20):
+EXACT JSON SCHEMA — your response MUST match this structure exactly:
+{"headlines":[{...},{...}],"analysis":{...}}
+
+The root object MUST have exactly two keys: "headlines" (array) and "analysis" (object).
+Do NOT wrap in any container object. Do NOT add extra keys at root level.
+
+HEADLINE FIELDS (each object in the "headlines" array):
 - title: factual headline ≤20 words describing the speculation/rumour/leak
 - trendScore: integer 1–100 based on upvotes, comments, and cross-sub confirmation
-- summary: 150–200 words. What is being speculated/rumoured? Who are the key actors? What evidence or signals exist? What's the bull/bear case? Be specific — include tickers, prices, and dates where present in the source.
+- summary: 80–120 words. What is being speculated? Key actors, evidence, bull/bear case. Include tickers and dates from source.
 - url: Reddit permalink or linked source URL from the post
-- alternateUrl: second source if available, otherwise leave as the same permalink
+- alternateUrl: second source if available, otherwise same permalink
 - category: one of: merger-rumour | product-leak | earnings-speculation | geopolitical | currency | crypto | macro | corporate
-- socialPost: ≤280 character tweet written in the voice of a sharp market observer. Include relevant $TICKER if present. Do not copy the first sentence of summary.
+- socialPost: ≤280 character tweet. Include relevant $TICKER if present.
 - sentiment: exactly one word from: bullish | bearish | neutral | speculative | leaked | viral
 
-ANALYSIS SECTION:
-- performanceRanking: top 3 speculations ranked by potential market impact, one sentence each
-- verificationScore: integer 1–100 (how sourced/corroborated is the overall set)
-- integrityScore: integer 1–100 (signal-to-noise ratio of this batch)
-- overallSummary: 100–150 words — what is the dominant speculative theme this week? What are the highest-conviction rumours? What should a trader be watching?
-- globalSocialPost: ≤280 character summary tweet of the speculation landscape this week
+ANALYSIS FIELDS (the "analysis" object):
+- performanceRanking: top 3 speculations ranked by potential market impact
+- verificationScore: integer 1–100
+- integrityScore: integer 1–100
+- overallSummary: 80–120 words on dominant speculative themes and highest-conviction rumours
+- globalSocialPost: ≤280 character summary tweet
 
 OUTPUT RULES:
-1. Return ONLY valid JSON — no markdown, no code blocks.
-2. All 20 headlines must have summary and sentiment.
-3. Sort headlines array by trendScore descending.`;
+1. Return ONLY valid JSON — no markdown, no code blocks, no text before or after.
+2. Start your response with the exact characters: {"headlines":[
+3. All 20 headlines must have summary and sentiment.
+4. Sort by trendScore descending.`;
 
   onProgress?.('Sending to AI provider...', 35, specSources);
   console.log('[generateSpeculationReport] Calling AI...');
@@ -719,10 +726,17 @@ ANALYSIS SECTION:
 - watchlist: 3–4 key indicators or data points to monitor daily this week (e.g. "10Y yield above 4.5%", "USD/CNY rate", "VIX above 20")
 - globalSocialPost: ≤280 character forward-looking tweet summarising the week's biggest risk
 
+EXACT JSON SCHEMA — your response MUST match this structure exactly:
+{"events":[{...},{...}],"analysis":{...}}
+
+The root object MUST have exactly two keys: "events" (array) and "analysis" (object).
+Do NOT wrap in any container object. Do NOT add extra keys at root level.
+
 OUTPUT RULES:
 1. Return ONLY valid JSON — no markdown, no code blocks, no text before or after.
-2. All 10 events must have probability, effectIfHappens, effectIfDoesntHappen, markets, industries, and countries.
-3. Sort events array by rank ascending (1 = highest expected impact).`;
+2. Start your response with the exact characters: {"events":[
+3. All 10 events must have probability, effectIfHappens, effectIfDoesntHappen, markets, industries, and countries.
+4. Sort events array by rank ascending (1 = highest expected impact).`;
 
   try {
     onProgress?.('Sending to AI provider...', 35, sourceStatuses);
@@ -824,27 +838,34 @@ ${trendingWeightInstructions}
 
 ${conspiracyAddition}
 
-HEADLINE FIELDS (repeat for all 20):
+EXACT JSON SCHEMA — your response MUST match this structure exactly:
+{"headlines":[{...},{...}],"analysis":{...}}
+
+The root object MUST have exactly two keys: "headlines" (array) and "analysis" (object).
+Do NOT wrap in any container object. Do NOT add extra keys at root level.
+
+HEADLINE FIELDS (each object in the "headlines" array):
 - title: factual headline ≤20 words — WHAT, WHERE, WHEN
 - trendScore: integer 1–100 (trending weight as described above)
-- summary: 150–200 words. Cover: what happened, who is involved, key numbers/dates, and why it matters strategically. Be specific and factual.
+- summary: 80–120 words. Cover: what happened, who is involved, key numbers/dates, and why it matters. Be specific and factual.
 - url: primary source URL (Reuters, AP, Bloomberg, BBC, WSJ, FT, etc.)
 - alternateUrl: second independent source URL (different publication)
 - category: conflict | tension | diplomatic | strategic | military | economic | technology | market
-- socialPost: ≤280 character standalone tweet. Do NOT copy the first sentence of the summary. Write a punchy, self-contained post with a hook, key fact, and context. Must read well on its own.
+- socialPost: ≤280 character standalone tweet with a hook, key fact, and context.
 - sentiment: exactly one word from: ${cfg.sentimentVocab}
 
-ANALYSIS SECTION:
+ANALYSIS FIELDS (the "analysis" object):
 - performanceRanking: top 3 stories ranked by strategic importance, one sentence each
 - verificationScore: integer 1–100
 - integrityScore: integer 1–100
-- overallSummary: 100–150 word synthesis of dominant trends and forward outlook
+- overallSummary: 80–120 word synthesis of dominant trends and forward outlook
 - globalSocialPost: ≤280 character digest of the full report
 
 OUTPUT RULES:
 1. Return ONLY valid JSON — no markdown, no code blocks, no text before or after.
-2. All 20 headlines must have a summary and a sentiment value.
-3. Sort headlines array by trendScore descending before returning.`;
+2. Start your response with the exact characters: {"headlines":[
+3. All 20 headlines must have a summary and a sentiment value.
+4. Sort headlines array by trendScore descending.`;
 
   try {
     onProgress?.('Sending to AI provider...', 35, sourceStatuses);
@@ -1153,10 +1174,17 @@ ANALYSIS SECTION:
 - watchlist: 3–4 key indicators to monitor daily
 - globalSocialPost: ≤280 character forward-looking tweet
 
+EXACT JSON SCHEMA — your response MUST match this structure exactly:
+{"events":[{...},{...}],"analysis":{...}}
+
+The root object MUST have exactly two keys: "events" (array) and "analysis" (object).
+Do NOT wrap in any container object. Do NOT add extra keys at root level.
+
 OUTPUT RULES:
-1. Return ONLY valid JSON — no markdown, no code blocks.
-2. All 10 events must have probability, effectIfHappens, effectIfDoesntHappen, markets, industries, and countries.
-3. Sort events array by rank ascending.`;
+1. Return ONLY valid JSON — no markdown, no code blocks, no text before or after.
+2. Start your response with the exact characters: {"events":[
+3. All 10 events must have probability, effectIfHappens, effectIfDoesntHappen, markets, industries, and countries.
+4. Sort events array by rank ascending.`;
 
   onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
   console.log('[parseReportWithAI] Generating forecast...');
@@ -1203,27 +1231,34 @@ PRIORITY RANKING — weight by:
 3. Cross-subreddit confirmation
 4. Recency (last 48h scores highest)
 
-HEADLINE FIELDS (repeat for all 20):
+EXACT JSON SCHEMA — your response MUST match this structure exactly:
+{"headlines":[{...},{...}],"analysis":{...}}
+
+The root object MUST have exactly two keys: "headlines" (array) and "analysis" (object).
+Do NOT wrap in any container object. Do NOT add extra keys at root level.
+
+HEADLINE FIELDS (each object in the "headlines" array):
 - title: factual headline ≤20 words
 - trendScore: integer 1–100
-- summary: 150–200 words
+- summary: 80–120 words
 - url: Reddit permalink or source URL
 - alternateUrl: second source if available
 - category: one of: merger-rumour | product-leak | earnings-speculation | geopolitical | currency | crypto | macro | corporate
 - socialPost: ≤280 character tweet
 - sentiment: one of: bullish | bearish | neutral | speculative | leaked | viral
 
-ANALYSIS SECTION:
+ANALYSIS FIELDS (the "analysis" object):
 - performanceRanking: top 3 speculations ranked by impact
 - verificationScore: integer 1–100
 - integrityScore: integer 1–100
-- overallSummary: 100–150 words
+- overallSummary: 80–120 words
 - globalSocialPost: ≤280 character summary tweet
 
 OUTPUT RULES:
-1. Return ONLY valid JSON.
-2. All 20 headlines must have summary and sentiment.
-3. Sort by trendScore descending.`;
+1. Return ONLY valid JSON — no markdown, no code blocks, no text before or after.
+2. Start your response with the exact characters: {"headlines":[
+3. All 20 headlines must have summary and sentiment.
+4. Sort by trendScore descending.`;
 
   onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
   const aiResponse = await generateReportWithFallback(prompt, ['claude', 'gpt'], 9000);
@@ -1316,27 +1351,34 @@ ${trendingWeightInstructions}
 
 ${conspiracyAddition}
 
-HEADLINE FIELDS (repeat for all 20):
+EXACT JSON SCHEMA — your response MUST match this structure exactly:
+{"headlines":[{...},{...}],"analysis":{...}}
+
+The root object MUST have exactly two keys: "headlines" (array) and "analysis" (object).
+Do NOT wrap in any container object. Do NOT add extra keys at root level.
+
+HEADLINE FIELDS (each object in the "headlines" array):
 - title: factual headline ≤20 words
 - trendScore: integer 1–100
-- summary: 150–200 words
+- summary: 80–120 words covering what happened, who, key numbers, and why it matters.
 - url: primary source URL
 - alternateUrl: second independent source URL
 - category: conflict | tension | diplomatic | strategic | military | economic | technology | market
 - socialPost: ≤280 character standalone tweet
 - sentiment: exactly one word from: ${cfg.sentimentVocab}
 
-ANALYSIS SECTION:
+ANALYSIS FIELDS (the "analysis" object):
 - performanceRanking: top 3 stories ranked by importance
 - verificationScore: integer 1–100
 - integrityScore: integer 1–100
-- overallSummary: 100–150 word synthesis
+- overallSummary: 80–120 word synthesis
 - globalSocialPost: ≤280 character digest
 
 OUTPUT RULES:
-1. Return ONLY valid JSON.
-2. All 20 headlines must have summary and sentiment.
-3. Sort by trendScore descending.`;
+1. Return ONLY valid JSON — no markdown, no code blocks, no text before or after.
+2. Start your response with the exact characters: {"headlines":[
+3. All 20 headlines must have summary and sentiment.
+4. Sort by trendScore descending.`;
 
   onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
   console.log(`[parseReportWithAI] Generating ${type} report...`);

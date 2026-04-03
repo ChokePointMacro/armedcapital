@@ -148,6 +148,11 @@ async function generateWithGemini(prompt: string): Promise<AIResponse> {
 async function generateWithClaude(prompt: string, maxTokens = 16000): Promise<AIResponse> {
   const client = getAnthropic();
 
+  // Use assistant prefill to force JSON to start correctly.
+  // Detect whether the prompt expects "events" (forecast) or "headlines" (everything else).
+  const isForecast = prompt.includes('EVENT FIELDS') && prompt.includes('"events"');
+  const prefill = isForecast ? '{"events":[' : '{"headlines":[';
+
   const response = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: maxTokens,
@@ -156,13 +161,20 @@ async function generateWithClaude(prompt: string, maxTokens = 16000): Promise<AI
         role: "user",
         content: prompt,
       },
+      {
+        role: "assistant",
+        content: prefill,
+      },
     ],
-    system: "You are a professional analyst. Return ONLY valid JSON with no additional text or markdown.",
+    system: "You are a professional analyst. Return ONLY valid JSON with no additional text or markdown. Follow the exact JSON schema specified in the prompt.",
   });
 
-  const content =
+  const rawContent =
     response.content[0].type === "text" ? response.content[0].text : "";
-  if (!content) throw new Error("Empty response from Claude");
+  if (!rawContent) throw new Error("Empty response from Claude");
+
+  // Prepend the prefill since Claude continues from it
+  const content = prefill + rawContent;
 
   const warnings: string[] = [];
   if (response.stop_reason === "max_tokens") {
@@ -187,7 +199,7 @@ async function generateWithGPT(prompt: string, maxTokens = 8000): Promise<AIResp
       {
         role: "system",
         content:
-          "You are a professional analyst. Return ONLY valid JSON - no markdown, no backticks, no explanations. Start with { and end with }. Do not wrap in code blocks or add any text before or after the JSON.",
+          "You are a professional analyst. Return ONLY valid JSON - no markdown, no backticks, no explanations. Your response must start with {\"headlines\":[ and the root object must have exactly two keys: \"headlines\" (array) and \"analysis\" (object). Do not wrap in code blocks or add any text before or after the JSON.",
       },
       {
         role: "user",
