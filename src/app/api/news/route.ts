@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch news from Polygon
-    let news = await fetchPolygonNews(ticker, limit);
+    let news = await fetchPolygonNews(ticker ?? undefined, limit);
     let source: 'polygon' | 'simulated' = 'polygon';
 
     // Fallback to simulated data if no API key or no results
