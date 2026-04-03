@@ -12,7 +12,7 @@ import { NotificationBell } from './NotificationBell';
 import MatrixBackground from './MatrixBackground';
 import type { UserData } from '@/types';
 
-const NAV_ITEMS = [
+const NAV_ITEMS: { to: string; label: string; admin?: boolean }[] = [
   { to: '/', label: 'Briefing' },
   { to: '/markets-hub', label: 'Markets' },
   { to: '/signals', label: 'Signals' },
@@ -29,7 +29,7 @@ const NAV_ITEMS = [
   { to: '/operations', label: 'Operations', admin: true },
 ];
 
-const AUTH_NAV_ITEMS = [
+const AUTH_NAV_ITEMS: { to: string; label: string; admin?: boolean }[] = [
   { to: '/studio', label: 'Studio' },
 ];
 
