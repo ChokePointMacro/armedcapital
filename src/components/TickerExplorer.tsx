@@ -80,7 +80,8 @@ export const TickerExplorer = ({ symbol }: { symbol: string }) => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const tickerData = await apiFetch(`/api/ticker/${symbol}`);
+        const res = await apiFetch(`/api/ticker/${symbol}`);
+        const tickerData = await res.json();
         setData(tickerData);
       } catch (error) {
         console.error('Error fetching ticker data:', error);
@@ -117,7 +118,8 @@ export const TickerExplorer = ({ symbol }: { symbol: string }) => {
           prompt: `Generate a concise intelligence brief for ${data.symbol} (${data.name}). Include price action, volume, key levels, and any notable news. Keep it to 3-4 paragraphs.`,
         }),
       });
-      setBrief(response.text || response.brief);
+      const result = await response.json();
+      setBrief(result.text || result.brief);
     } catch (error) {
       console.error('Error generating brief:', error);
       setBrief('Failed to generate brief');
