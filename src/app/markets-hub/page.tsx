@@ -10,15 +10,15 @@ import { DarkPool } from '@/components/DarkPool';
 import { useUserData } from '@/hooks/useUserData';
 import { TrendingUp, Activity, Waves } from 'lucide-react';
 
-const SUB_TABS = [
+const SUB_TABS: { key: string; label: string; icon: React.ReactNode; badge?: string }[] = [
   { key: 'markets', label: 'Markets', icon: <TrendingUp size={12} /> },
   { key: 'market-tide', label: 'Market Tide', icon: <Activity size={12} /> },
   { key: 'trade-flow', label: 'Crypto Flow', icon: <Waves size={12} /> },
   { key: 'options-flow', label: 'Options Flow', icon: <Waves size={12} />, badge: 'LIVE' },
   { key: 'dark-pool', label: 'Dark Pool', icon: <Waves size={12} />, badge: 'NEW' },
-] as const;
+];
 
-type SubTab = typeof SUB_TABS[number]['key'];
+type SubTab = 'markets' | 'market-tide' | 'trade-flow' | 'options-flow' | 'dark-pool';
 
 export default function MarketsHubPage() {
   const userData = useUserData();

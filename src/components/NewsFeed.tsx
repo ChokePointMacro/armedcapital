@@ -94,7 +94,8 @@ export const NewsFeed = () => {
     const fetchNews = async () => {
       try {
         setLoading(true);
-        const response = (await apiFetch('/api/news')) as NewsResponse;
+        const res = await apiFetch('/api/news');
+        const response = (await res.json()) as NewsResponse;
         const previousHeadlines = new Set(news.map(n => n.title));
         const newTitles = response.data
           .filter(n => !previousHeadlines.has(n.title))

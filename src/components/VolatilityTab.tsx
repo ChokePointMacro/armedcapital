@@ -141,7 +141,8 @@ export const VolatilityTab = ({ symbol }: { symbol: string }) => {
     const fetchVolatility = async () => {
       try {
         setLoading(true);
-        const response = (await apiFetch(`/api/volatility/${symbol}`)) as VolatilityData;
+        const res = await apiFetch(`/api/volatility/${symbol}`);
+        const response = (await res.json()) as VolatilityData;
         setData(response);
       } catch (error) {
         console.error(`[VolatilityTab] Error fetching volatility for ${symbol}:`, error);
