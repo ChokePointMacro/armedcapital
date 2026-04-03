@@ -559,18 +559,57 @@ function normalizeWeeklyReport(data: any): WeeklyReport {
   if (Array.isArray(data.headlines) && data.headlines.length > 0) return data;
 
   // Common wrapper patterns: { report: { headlines: [] } }, { data: { headlines: [] } }
-  for (const key of ['report', 'data', 'result', 'response', 'output']) {
+  for (const key of ['report', 'data', 'result', 'response', 'output', 'weekly_report', 'weeklyReport', 'intelligence_brief', 'brief']) {
     if (data[key] && Array.isArray(data[key].headlines)) {
+      console.warn(`[normalizeWeeklyReport] Found headlines under wrapper key "${key}"`);
       return { headlines: data[key].headlines, analysis: data[key].analysis || data.analysis };
     }
   }
 
-  // Alternative key names: items, news, stories, articles
-  for (const key of ['items', 'news', 'stories', 'articles', 'events']) {
+  // Alternative key names at top level or one level deep
+  const headlineKeys = ['items', 'news', 'stories', 'articles', 'events', 'news_items', 'newsItems', 'top_stories', 'topStories', 'intelligence_items', 'intelligenceItems'];
+  for (const key of headlineKeys) {
     if (Array.isArray(data[key]) && data[key].length > 0 && data[key][0]?.title) {
       console.warn(`[normalizeWeeklyReport] Using alternate key "${key}" as headlines`);
       return { headlines: data[key], analysis: data.analysis };
     }
+  }
+
+  // Check one level deep for alternate keys inside wrapper objects
+  for (const wrapperKey of Object.keys(data)) {
+    const inner = data[wrapperKey];
+    if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+      // Check for headlines inside the wrapper
+      if (Array.isArray(inner.headlines) && inner.headlines.length > 0) {
+        console.warn(`[normalizeWeeklyReport] Found headlines inside "${wrapperKey}.headlines"`);
+        return { headlines: inner.headlines, analysis: inner.analysis || data.analysis };
+      }
+      // Check alternate keys inside wrapper
+      for (const altKey of headlineKeys) {
+        if (Array.isArray(inner[altKey]) && inner[altKey].length > 0 && inner[altKey][0]?.title) {
+          console.warn(`[normalizeWeeklyReport] Found headlines at "${wrapperKey}.${altKey}"`);
+          return { headlines: inner[altKey], analysis: inner.analysis || data.analysis };
+        }
+      }
+    }
+  }
+
+  // Deep search: recursively find any array of objects with "title" property
+  function findHeadlinesDeep(obj: any, depth = 0): any[] | null {
+    if (depth > 4) return null;
+    if (Array.isArray(obj) && obj.length >= 3 && obj[0]?.title) return obj;
+    if (obj && typeof obj === 'object') {
+      for (const val of Object.values(obj)) {
+        const found = findHeadlinesDeep(val, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  const deepFound = findHeadlinesDeep(data);
+  if (deepFound) {
+    console.warn(`[normalizeWeeklyReport] Deep search found ${deepFound.length} headline items`);
+    return { headlines: deepFound, analysis: data.analysis };
   }
 
   // Array at root level
@@ -580,7 +619,8 @@ function normalizeWeeklyReport(data: any): WeeklyReport {
   }
 
   // Log top-level keys for debugging
-  console.error(`[normalizeWeeklyReport] Unrecognized structure. Keys: ${Object.keys(data).join(', ')}`);
+  const sample = JSON.stringify(data).substring(0, 500);
+  console.error(`[normalizeWeeklyReport] Unrecognized structure. Keys: ${Object.keys(data).join(', ')}. Sample: ${sample}`);
   return data;
 }
 
@@ -1188,6 +1228,7 @@ OUTPUT RULES:
   onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
   const aiResponse = await generateReportWithFallback(prompt, ['claude', 'gpt'], 9000);
   onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
+  console.log(`[parseSpeculationFromSnapshot] Raw AI (first 500): ${aiResponse.content.substring(0, 500)}`);
   let parsed = normalizeWeeklyReport(parseJSONResponse<WeeklyReport>(aiResponse));
   const warnings: string[] = [...(aiResponse.warnings || [])];
 
@@ -1301,13 +1342,14 @@ OUTPUT RULES:
   console.log(`[parseReportWithAI] Generating ${type} report...`);
   const aiResponse = await generateReportWithFallback(prompt, ["claude", "gpt"], cfg.maxTokens);
   onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
+  console.log(`[parseReportWithAI] Raw AI response (first 500 chars): ${aiResponse.content.substring(0, 500)}`);
 
   let parsed = parseJSONResponse<WeeklyReport>(aiResponse);
   const warnings: string[] = [...(aiResponse.warnings || [])];
 
   // Normalize structure — AI sometimes wraps in a container object
   parsed = normalizeWeeklyReport(parsed);
-  console.log(`[parseReportWithAI] Parsed keys: ${Object.keys(parsed).join(', ')}, headlines: ${parsed.headlines?.length ?? 'none'}`);
+  console.log(`[parseReportWithAI] After normalize — keys: ${Object.keys(parsed).join(', ')}, headlines: ${parsed.headlines?.length ?? 'none'}`);
 
   if (!parsed.headlines?.length) throw new Error("No headlines in response");
   if (parsed.headlines.length < 20) warnings.push(`Only ${parsed.headlines.length}/20 headlines generated.`);
