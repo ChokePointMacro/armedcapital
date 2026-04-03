@@ -31,7 +31,7 @@ export default function MarketsHubPage() {
         {SUB_TABS.map(st => (
           <button
             key={st.key}
-            onClick={() => setTab(st.key)}
+            onClick={() => setTab(st.key as SubTab)}
             className={`flex items-center gap-1.5 text-[11px] font-mono px-4 py-2.5 border-b-2 transition-colors relative ${
               tab === st.key
                 ? 'border-btc-orange text-btc-orange'
