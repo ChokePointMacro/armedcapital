@@ -91,6 +91,7 @@ export const Dashboard = () => {
   const [showNewContextForm, setShowNewContextForm] = useState(false);
   const [newContextName, setNewContextName] = useState('');
   const [newContextContent, setNewContextContent] = useState('');
+  const [retrySnapshotId, setRetrySnapshotId] = useState<string | null>(null);
   const instaAssetRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const router = useRouter();
@@ -216,6 +217,7 @@ export const Dashboard = () => {
     setReportSources([]);
     setReportWarnings([]);
     setAudioUrl(null);
+    setRetrySnapshotId(null);
     abortControllerRef.current = new AbortController();
 
     // Simulate progress bar stages
@@ -239,6 +241,9 @@ export const Dashboard = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
+        if (errorData.retryable && errorData.snapshotId) {
+          setRetrySnapshotId(errorData.snapshotId);
+        }
         throw new Error(errorData.error || `API error: ${response.status}`);
       }
 
@@ -634,7 +639,57 @@ export const Dashboard = () => {
           className="p-4 bg-red-500/10 border border-red-500/30 text-red-400 font-mono text-sm flex items-center justify-between gap-4"
         >
           <span>⚠️ {loadingError}</span>
-          <button onClick={() => setLoadingError(null)} className="text-red-400 hover:text-red-300 transition-colors"><XIcon size={14} /></button>
+          <div className="flex items-center gap-2">
+            {retrySnapshotId && (
+              <button
+                onClick={async () => {
+                  setLoadingError(null);
+                  setLoading(true);
+                  setLoadingStage('Retrying AI parse (data already saved)...');
+                  setLoadingPercent(40);
+                  try {
+                    const response = await apiFetch('/api/generate-report', {
+                      method: 'POST',
+                      body: JSON.stringify({ snapshotId: retrySnapshotId, retryParse: true }),
+                    });
+                    if (!response.ok) {
+                      const errorData = await response.json();
+                      if (errorData.retryable && errorData.snapshotId) {
+                        setRetrySnapshotId(errorData.snapshotId);
+                      }
+                      throw new Error(errorData.error || `Retry failed: ${response.status}`);
+                    }
+                    const report = await response.json();
+                    const isForecastType = reportType === 'forecast';
+                    const sources = report._sources || [];
+                    const warnings = report._warnings || [];
+                    setReportSources(sources);
+                    setReportWarnings(warnings);
+                    if (isForecastType && !report.events?.length) throw new Error("No forecast events on retry.");
+                    if (!isForecastType && !report.headlines?.length) throw new Error("No headlines on retry.");
+                    const id = `${reportType}-${Date.now()}`;
+                    await apiFetch('/api/reports', {
+                      method: 'POST',
+                      body: JSON.stringify({ id, type: reportType, content: report }),
+                    });
+                    await fetchReports();
+                    setActiveReportId(id);
+                    setRetrySnapshotId(null);
+                    setLoadingPercent(100);
+                    setLoadingStage('Complete');
+                  } catch (err) {
+                    setLoadingError(err instanceof Error ? err.message : 'Retry failed');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                className="px-3 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:bg-amber-500/30 text-xs font-mono uppercase tracking-wider transition-colors"
+              >
+                Retry AI Parse
+              </button>
+            )}
+            <button onClick={() => { setLoadingError(null); setRetrySnapshotId(null); }} className="text-red-400 hover:text-red-300 transition-colors"><XIcon size={14} /></button>
+          </div>
         </motion.div>
       )}
 

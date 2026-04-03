@@ -916,3 +916,358 @@ STRICT REQUIREMENTS:
 
   return "Failed to generate Instagram caption. Please try again.";
 }
+
+// ── Two-Phase Architecture: Fetch → Snapshot → AI Parse ──────────────────────
+
+/**
+ * Phase 1: Fetch all data (RSS feeds, enrichment, Reddit/StockTwits) without AI.
+ * Returns raw data that can be persisted before AI processing.
+ */
+export interface ReportDataSnapshot {
+  type: string;
+  customTopic?: string;
+  liveNewsContext: string;
+  enrichmentBlock: string;
+  speculationContext?: string;
+  sourceStatuses: SourceStatus[];
+  fetchedAt: string;
+}
+
+export async function fetchReportData(
+  type: string,
+  customTopic?: string,
+  onProgress?: ProgressCallback
+): Promise<ReportDataSnapshot> {
+  const windowDays = type === 'conspiracies' ? 30 : 7;
+
+  if (type === 'speculation') {
+    onProgress?.('Fetching Reddit & StockTwits...', 10);
+    console.log('[fetchReportData] Fetching speculation + enrichment...');
+    const [specContext, enrichment] = await Promise.all([
+      fetchSpeculationContext(windowDays),
+      fetchAllEnrichedData(),
+    ]);
+    const enrichBlock = enrichedDataToPromptBlock(enrichment);
+    const sources: SourceStatus[] = [
+      { name: 'Reddit', url: 'reddit.com', status: specContext.includes('REDDIT LIVE FEED') ? 'ok' : 'error', articles: (specContext.match(/\[\d+\]/g) || []).length },
+      { name: 'StockTwits', url: 'stocktwits.com', status: specContext.includes('STOCKTWITS TRENDING') ? 'ok' : 'error' },
+    ];
+    onProgress?.('Data fetched, saving snapshot...', 30, sources);
+    return {
+      type,
+      liveNewsContext: '',
+      enrichmentBlock: enrichBlock,
+      speculationContext: specContext,
+      sourceStatuses: sources,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  // forecast, weekly, custom, etc.
+  onProgress?.('Fetching news sources...', 10);
+  console.log(`[fetchReportData] Fetching RSS + enrichment for ${type}...`);
+  const feedType = type === 'forecast' ? 'global' : type;
+  const [newsResult, enrichment] = await Promise.all([
+    fetchNewsContext(feedType === 'custom' ? 'global' : feedType, windowDays),
+    fetchAllEnrichedData(),
+  ]);
+  const enrichBlock = enrichedDataToPromptBlock(enrichment);
+  onProgress?.('Data fetched, saving snapshot...', 30, newsResult.sources);
+
+  return {
+    type,
+    customTopic,
+    liveNewsContext: newsResult.text,
+    enrichmentBlock: enrichBlock,
+    sourceStatuses: newsResult.sources,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Phase 2: Build prompt from snapshot data and call AI provider.
+ * Can be retried independently without re-fetching data.
+ */
+export async function parseReportWithAI(
+  snapshot: ReportDataSnapshot,
+  onProgress?: ProgressCallback
+): Promise<(WeeklyReport | ForecastReport) & { _sources?: SourceStatus[]; _warnings?: string[] }> {
+  const currentDate = formatCurrentDate();
+  const sources = snapshot.sourceStatuses;
+
+  if (snapshot.type === 'forecast') {
+    return parseForecastFromSnapshot(snapshot, currentDate, onProgress);
+  }
+
+  if (snapshot.type === 'speculation') {
+    return parseSpeculationFromSnapshot(snapshot, currentDate, onProgress);
+  }
+
+  // Weekly / custom / typed reports
+  return parseWeeklyFromSnapshot(snapshot, currentDate, onProgress);
+}
+
+async function parseForecastFromSnapshot(
+  snapshot: ReportDataSnapshot,
+  currentDate: string,
+  onProgress?: ProgressCallback
+): Promise<ForecastReport & { _sources?: SourceStatus[]; _warnings?: string[] }> {
+  const sevenDaysOut = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+
+  const prompt = `You are a senior geopolitical risk analyst and macro strategist. Today is ${currentDate}. Your forward planning window is ${currentDate} through ${sevenDaysOut}.
+
+CRITICAL — DATA SOURCE RULES:
+1. Use ONLY the live news feed below to identify real upcoming events. Do NOT use training data to fill in events.
+2. Every event you list must be grounded in something mentioned or implied in the live feed.
+3. URLs must come from the live feed articles. Do not construct or guess URLs.
+
+${snapshot.liveNewsContext}
+
+--- LIVE MARKET & MACRO DATA (use for context and accuracy) ---
+${snapshot.enrichmentBlock}
+--- END MARKET DATA ---
+
+TASK: Using the live news above AND the market/macro data, identify exactly 10 upcoming events, decisions, or catalysts within the next 7 days that carry the highest potential to move financial markets or escalate/de-escalate geopolitical tension. These must be REAL scheduled or anticipated events — central bank decisions, earnings, elections, summits, treaty deadlines, sanctions reviews, military exercises, etc.
+
+For each event, provide a rigorous probabilistic assessment and dual-outcome impact analysis.
+
+RANKING: Sort events by (probability × expected magnitude of impact). Most impactful expected outcome = rank 1.
+
+EVENT FIELDS (repeat for all 10):
+- rank: integer 1–10
+- title: clear event name ≤15 words — WHAT, WHERE, WHEN
+- expectedDate: specific date or date range
+- summary: 100–130 words
+- probability: integer 0–100
+- effectIfHappens: 60–80 words
+- effectIfDoesntHappen: 60–80 words
+- markets: array of 2–5 specific markets or assets affected
+- industries: array of 2–4 industries most exposed
+- countries: array of 2–5 countries or regions most affected
+- category: one of: monetary-policy | earnings | geopolitical | elections | trade | energy | regulation | military
+- sentiment: one of: risk-on | risk-off | neutral | escalating | de-escalating
+- url: source URL
+- alternateUrl: second independent source URL
+
+ANALYSIS SECTION:
+- dominantTheme: single sentence
+- highestImpactEvent: name the single event with greatest market-moving power and why in 2 sentences
+- overallRiskLevel: one of: LOW | MODERATE | ELEVATED | HIGH | CRITICAL
+- watchlist: 3–4 key indicators to monitor daily
+- globalSocialPost: ≤280 character forward-looking tweet
+
+OUTPUT RULES:
+1. Return ONLY valid JSON — no markdown, no code blocks.
+2. All 10 events must have probability, effectIfHappens, effectIfDoesntHappen, markets, industries, and countries.
+3. Sort events array by rank ascending.`;
+
+  onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
+  console.log('[parseReportWithAI] Generating forecast...');
+  const aiResponse = await generateReportWithFallback(prompt, ['claude', 'gpt'], 10000);
+  onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
+  const parsed = parseJSONResponse<ForecastReport>(aiResponse);
+  const warnings: string[] = [...(aiResponse.warnings || [])];
+
+  if (!parsed.events?.length) throw new Error('No events in forecast response');
+  if (parsed.events.length < 10) warnings.push(`Only ${parsed.events.length}/10 events generated.`);
+  if (!parsed.analysis) warnings.push('Analysis section was missing.');
+  parsed.events.sort((a, b) => a.rank - b.rank);
+
+  onProgress?.('Complete', 100, snapshot.sourceStatuses);
+  return { ...parsed, _sources: snapshot.sourceStatuses, _warnings: warnings.length ? warnings : undefined };
+}
+
+async function parseSpeculationFromSnapshot(
+  snapshot: ReportDataSnapshot,
+  currentDate: string,
+  onProgress?: ProgressCallback
+): Promise<WeeklyReport & { _sources?: SourceStatus[]; _warnings?: string[] }> {
+  const windowStart = formatDateOffset(7);
+
+  const prompt = `You are an intelligence analyst specialising in market rumours, leaked information, and crowd-sourced speculation. Today is ${currentDate}.
+
+CRITICAL — DATA SOURCE RULES:
+1. Use ONLY the Reddit posts and StockTwits data provided below. Do NOT use training data knowledge.
+2. Only include posts dated between ${windowStart} and ${currentDate}. Ignore older posts.
+3. Every headline must be grounded in a real post from the feed.
+4. If a category has no matching posts, skip it rather than inventing content.
+
+${snapshot.speculationContext || ''}
+
+--- LIVE MARKET & MACRO DATA (use for context) ---
+${snapshot.enrichmentBlock}
+--- END MARKET DATA ---
+
+TASK: Extract exactly 20 of the highest-signal speculation items covering: merger/acquisition rumours, product leaks, earnings surprises, geopolitical speculation, currency moves, crypto catalysts, and notable viral business narratives.
+
+PRIORITY RANKING — weight by:
+1. Upvote score × comment count (community conviction)
+2. Presence of specific ticker symbols, company names, or dates (actionability)
+3. Cross-subreddit confirmation
+4. Recency (last 48h scores highest)
+
+HEADLINE FIELDS (repeat for all 20):
+- title: factual headline ≤20 words
+- trendScore: integer 1–100
+- summary: 150–200 words
+- url: Reddit permalink or source URL
+- alternateUrl: second source if available
+- category: one of: merger-rumour | product-leak | earnings-speculation | geopolitical | currency | crypto | macro | corporate
+- socialPost: ≤280 character tweet
+- sentiment: one of: bullish | bearish | neutral | speculative | leaked | viral
+
+ANALYSIS SECTION:
+- performanceRanking: top 3 speculations ranked by impact
+- verificationScore: integer 1–100
+- integrityScore: integer 1–100
+- overallSummary: 100–150 words
+- globalSocialPost: ≤280 character summary tweet
+
+OUTPUT RULES:
+1. Return ONLY valid JSON.
+2. All 20 headlines must have summary and sentiment.
+3. Sort by trendScore descending.`;
+
+  onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
+  const aiResponse = await generateReportWithFallback(prompt, ['claude', 'gpt'], 9000);
+  onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
+  const parsed = parseJSONResponse<WeeklyReport>(aiResponse);
+  const warnings: string[] = [...(aiResponse.warnings || [])];
+
+  if (!parsed.headlines?.length) throw new Error('No headlines in speculation response');
+  if (parsed.headlines.length < 20) warnings.push(`Only ${parsed.headlines.length}/20 speculation items generated.`);
+  if (!parsed.analysis) {
+    parsed.analysis = {
+      performanceRanking: 'Top speculation items ranked by community conviction',
+      verificationScore: 45, integrityScore: 60,
+      overallSummary: `${parsed.headlines.length} speculation items sourced from Reddit and StockTwits.`,
+      globalSocialPost: `Speculation Pulse: ${parsed.headlines[0]?.title}`,
+    };
+    warnings.push('Analysis section was missing — synthesized from headlines.');
+  }
+  parsed.headlines.sort((a, b) => (b.trendScore ?? 0) - (a.trendScore ?? 0));
+
+  onProgress?.('Complete', 100, snapshot.sourceStatuses);
+  return { ...parsed, _sources: snapshot.sourceStatuses, _warnings: warnings.length ? warnings : undefined };
+}
+
+async function parseWeeklyFromSnapshot(
+  snapshot: ReportDataSnapshot,
+  currentDate: string,
+  onProgress?: ProgressCallback
+): Promise<WeeklyReport & { _sources?: SourceStatus[]; _warnings?: string[] }> {
+  const type = snapshot.type;
+  const cfg: ReportConfig = type === 'custom' && snapshot.customTopic
+    ? {
+        topicFocus: snapshot.customTopic,
+        reportTitle: "Custom Intelligence Brief",
+        timeframe: "last 90 days with 30-day forward outlook",
+        timeframeDescriptor: "from the last 90 days, with forward-looking risk analysis for the next 30 days",
+        sentimentVocab: "bullish | bearish | neutral | escalating | stable | de-escalating | critical | opportunity",
+        maxTokens: 16000,
+      }
+    : (REPORT_CONFIGS[type] ?? REPORT_CONFIGS.global);
+
+  const trendingWeightInstructions = getTrendingWeightInstructions(type);
+  const windowDays = cfg.isConspiracy ? 30 : 7;
+  const windowStart = formatDateOffset(windowDays);
+
+  const conspiracyAddition = cfg.isConspiracy
+    ? '\nCONSPIRACY REPORT: Focus on trending topics with LOW credibility from the last 30 days.\nInclude historical context from the last 20 years to show patterns and recurring themes.'
+    : '';
+
+  const mandatoryAreas = type === 'global' ? `MANDATORY COVERAGE AREAS — you MUST include at least one headline from each:
+1. Active military conflicts (Ukraine-Russia, Middle East, any new flashpoints)
+2. US / China / EU economic or trade policy
+3. Energy markets (oil, gas, commodities)
+4. Emerging market crises or political instability
+5. Technology / AI regulation or major corporate development
+Fill remaining slots with the highest-trendScore global stories available.
+
+RECENCY: Prioritize last 72 hours.` : type === 'nasdaq' ? `MANDATORY COVERAGE AREAS — you MUST include at least one headline from each:
+1. Mega-cap AI/cloud (NVDA, MSFT, GOOGL, META, AMZN)
+2. Consumer tech (AAPL, TSLA)
+3. Semiconductors or hardware (AVGO, AMD, INTC, QCOM)
+4. Analyst calls or institutional moves on any Nasdaq-100 name
+5. Macro catalyst directly affecting Nasdaq (Fed, rates, CPI if tech-relevant)
+Fill remaining slots with the highest-trendScore Nasdaq-100 stories available.` : '';
+
+  const prompt = `You are a factual intelligence analyst. Today is ${currentDate}.
+
+CRITICAL INSTRUCTION — DATA SOURCE RULES:
+1. You MUST base ALL headlines EXCLUSIVELY on the LIVE NEWS FEED provided below.
+2. You are STRICTLY FORBIDDEN from using your training data knowledge.
+3. If a required category has no matching article, mark it as "No live data available for this category".
+4. Every headline's URL must come directly from the live feed articles.
+5. Only include events between ${windowStart} and ${currentDate}.
+
+${snapshot.liveNewsContext}
+
+--- LIVE MARKET & MACRO DATA ---
+${snapshot.enrichmentBlock}
+--- END MARKET DATA ---
+
+TASK: Generate exactly 20 headlines of MAJOR news events ${cfg.timeframeDescriptor}.
+Topic scope: ${cfg.topicFocus}
+
+${mandatoryAreas}
+
+${type === 'conspiracies' ? 'HISTORICAL CONTEXT: Include patterns from last 20 years, prioritize last 30 days.' : ''}
+
+${trendingWeightInstructions}
+
+${conspiracyAddition}
+
+HEADLINE FIELDS (repeat for all 20):
+- title: factual headline ≤20 words
+- trendScore: integer 1–100
+- summary: 150–200 words
+- url: primary source URL
+- alternateUrl: second independent source URL
+- category: conflict | tension | diplomatic | strategic | military | economic | technology | market
+- socialPost: ≤280 character standalone tweet
+- sentiment: exactly one word from: ${cfg.sentimentVocab}
+
+ANALYSIS SECTION:
+- performanceRanking: top 3 stories ranked by importance
+- verificationScore: integer 1–100
+- integrityScore: integer 1–100
+- overallSummary: 100–150 word synthesis
+- globalSocialPost: ≤280 character digest
+
+OUTPUT RULES:
+1. Return ONLY valid JSON.
+2. All 20 headlines must have summary and sentiment.
+3. Sort by trendScore descending.`;
+
+  onProgress?.('Sending to AI provider...', 40, snapshot.sourceStatuses);
+  console.log(`[parseReportWithAI] Generating ${type} report...`);
+  const aiResponse = await generateReportWithFallback(prompt, ["claude", "gpt"], cfg.maxTokens);
+  onProgress?.('Parsing AI response...', 85, snapshot.sourceStatuses);
+
+  const parsed = parseJSONResponse<WeeklyReport>(aiResponse);
+  const warnings: string[] = [...(aiResponse.warnings || [])];
+
+  if (!parsed.headlines?.length) throw new Error("No headlines in response");
+  if (parsed.headlines.length < 20) warnings.push(`Only ${parsed.headlines.length}/20 headlines generated.`);
+
+  if (!parsed.analysis) {
+    const topHeadline = parsed.headlines[0];
+    const dominantSentiment = parsed.headlines.map(h => h.sentiment).find(Boolean) ?? 'escalating';
+    parsed.analysis = {
+      performanceRanking: `${parsed.headlines.length} intelligence items ranked by strategic impact`,
+      verificationScore: 87, integrityScore: 91,
+      overallSummary: `This brief covers ${parsed.headlines.length} major developments. Top story: ${topHeadline?.title}.`,
+      globalSocialPost: `🔎 ${topHeadline?.title || 'Intelligence Brief'} — ${dominantSentiment} signal.`,
+    };
+    warnings.push('Analysis section was missing — synthesized from headlines.');
+  }
+
+  parsed.headlines.sort((a, b) => (b.trendScore ?? 0) - (a.trendScore ?? 0));
+  validateHeadlines(parsed.headlines);
+
+  onProgress?.('Complete', 100, snapshot.sourceStatuses);
+  return { ...parsed, _sources: snapshot.sourceStatuses, _warnings: warnings.length ? warnings : undefined };
+}
