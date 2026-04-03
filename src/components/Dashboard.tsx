@@ -205,6 +205,23 @@ export const Dashboard = () => {
     }
   };
 
+  // Helper to safely parse JSON from API responses (handles Vercel HTML 504 pages)
+  const safeParseResponse = async (response: Response): Promise<any> => {
+    if (!response.ok) {
+      let errorData: any = {};
+      try { errorData = await response.json(); } catch {
+        throw new Error(response.status === 504
+          ? 'Server timed out — please try again.'
+          : `API error: ${response.status}`);
+      }
+      if (errorData.retryable && errorData.snapshotId) {
+        setRetrySnapshotId(errorData.snapshotId);
+      }
+      throw new Error(errorData.error || `API error: ${response.status}`);
+    }
+    return response.json();
+  };
+
   const generateReport = async () => {
     if (reportType === 'custom' && !customTopic.trim()) {
       setLoadingError("Please enter a custom topic before generating.");
@@ -212,53 +229,60 @@ export const Dashboard = () => {
     }
     setLoading(true);
     setLoadingError(null);
-    setLoadingStage('Starting...');
-    setLoadingPercent(0);
+    setLoadingStage('Fetching news sources...');
+    setLoadingPercent(5);
     setReportSources([]);
     setReportWarnings([]);
     setAudioUrl(null);
     setRetrySnapshotId(null);
     abortControllerRef.current = new AbortController();
 
-    // Simulate progress bar stages
+    // Animate progress bar
     const progressInterval = setInterval(() => {
       setLoadingPercent(prev => {
-        if (prev < 15) { setLoadingStage('Fetching news sources...'); return prev + 3; }
-        if (prev < 30) { setLoadingStage('Filtering & scoring articles...'); return prev + 2; }
-        if (prev < 50) { setLoadingStage('Sending to AI provider...'); return prev + 1; }
-        if (prev < 85) { setLoadingStage('AI generating report...'); return prev + 0.5; }
-        if (prev < 92) { setLoadingStage('Parsing AI response...'); return prev + 0.3; }
+        if (prev < 25) { setLoadingStage('Fetching news & market data...'); return prev + 3; }
+        if (prev < 35) { setLoadingStage('Saving data snapshot...'); return prev + 1; }
+        if (prev < 55) { setLoadingStage('Sending to AI provider...'); return prev + 1; }
+        if (prev < 85) { setLoadingStage('AI generating report...'); return prev + 0.4; }
+        if (prev < 92) { setLoadingStage('Parsing AI response...'); return prev + 0.2; }
         return prev;
       });
     }, 800);
 
     try {
-      const response = await apiFetch('/api/generate-report', {
+      // ── REQUEST 1: Fetch data + save snapshot (fast, ~15s) ──
+      const fetchResponse = await apiFetch('/api/generate-report', {
         method: 'POST',
-        body: JSON.stringify({ type: reportType, customTopic: reportType === 'custom' ? customTopic : undefined }),
+        body: JSON.stringify({
+          type: reportType,
+          customTopic: reportType === 'custom' ? customTopic : undefined,
+          fetchOnly: true,
+        }),
         signal: abortControllerRef.current.signal,
       });
 
-      if (!response.ok) {
-        let errorData: any = {};
-        try {
-          errorData = await response.json();
-        } catch {
-          // Vercel 504 returns HTML, not JSON
-          throw new Error(response.status === 504
-            ? 'Report generation timed out. The server took too long — please try again.'
-            : `API error: ${response.status}`);
-        }
-        if (errorData.retryable && errorData.snapshotId) {
-          setRetrySnapshotId(errorData.snapshotId);
-        }
-        throw new Error(errorData.error || `API error: ${response.status}`);
+      const fetchResult = await safeParseResponse(fetchResponse);
+
+      if (!fetchResult.snapshotId) {
+        throw new Error('Failed to save data snapshot — no snapshotId returned.');
       }
 
-      const report = await response.json();
+      setRetrySnapshotId(fetchResult.snapshotId);
+      if (fetchResult.sourceStatuses) setReportSources(fetchResult.sourceStatuses);
+      setLoadingPercent(35);
+      setLoadingStage('Data saved — sending to AI...');
+
+      // ── REQUEST 2: AI parse from snapshot (up to 110s) ──
+      const parseResponse = await apiFetch('/api/generate-report', {
+        method: 'POST',
+        body: JSON.stringify({ snapshotId: fetchResult.snapshotId }),
+        signal: abortControllerRef.current.signal,
+      });
+
+      const report = await safeParseResponse(parseResponse);
       const isForecastType = reportType === 'forecast';
 
-      // Extract metadata — keep in report content so it persists
+      // Extract metadata
       const sources = report._sources || [];
       const warnings = report._warnings || [];
       setReportSources(sources);
@@ -276,6 +300,7 @@ export const Dashboard = () => {
       await fetchReports();
       setActiveReportId(id);
       setLoadingError(null);
+      setRetrySnapshotId(null);
       clearInterval(progressInterval);
       setLoadingPercent(100);
       setLoadingStage('Complete');
@@ -290,8 +315,6 @@ export const Dashboard = () => {
       if (err instanceof Error) {
         if (err.name === "AbortError" || err.message.includes("AbortError")) {
           errorMessage = "Report generation was cancelled.";
-        } else if (err.message.includes("timed out") || err.message.includes("TIMEOUT")) {
-          errorMessage = "Report generation timed out. The AI provider may be overloaded — please try again in a moment.";
         } else if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("network")) {
           errorMessage = "Network error — could not reach the server. Check your connection and try again.";
         } else {
