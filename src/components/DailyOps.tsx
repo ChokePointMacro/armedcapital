@@ -124,6 +124,10 @@ export function DailyOps() {
       const res = await fetch(`/api/ops-route?type=${opsType}`);
       if (res.ok) {
         const data = await res.json();
+        // Ensure tasks array exists even if API returns a status-only response
+        if (!data.tasks) data.tasks = [];
+        if (!data.total) data.total = 0;
+        if (!data.estimated_total_cost) data.estimated_total_cost = '0.00';
         setPreview(data);
       }
     } catch {
@@ -318,7 +322,7 @@ export function DailyOps() {
           )}
 
           {/* Task list */}
-          {preview?.tasks.map((task, i) => {
+          {preview?.tasks?.map((task, i) => {
             const result = taskResults[i];
             const isRunning = runningTask === i;
             return (
