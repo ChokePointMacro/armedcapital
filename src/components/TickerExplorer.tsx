@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
+import { VolatilityTab } from './VolatilityTab';
 
 interface TickerData {
   symbol: string;
@@ -246,29 +247,7 @@ export const TickerExplorer = ({ symbol }: { symbol: string }) => {
           </div>
         )}
         {activeTab === 'volatility' && (
-          <div className="bg-gray-900/50 border border-gray-800 rounded p-4 space-y-3">
-            <div className="text-sm font-mono text-gray-400">
-              <p className="mb-2">Available Volatility Metrics:</p>
-              {data.options ? (
-                <div className="space-y-1 text-xs">
-                  <div>
-                    <span className="text-gray-500">Call Volume:</span> <span className="text-gray-300">{data.options.callVolume.toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Put Volume:</span> <span className="text-gray-300">{data.options.putVolume.toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Put/Call Ratio:</span> <span className="text-gray-300">{data.options.putCallRatio.toFixed(2)}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">Total OI:</span> <span className="text-gray-300">{data.options.totalOI.toLocaleString()}</span>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-gray-500">No options data available for {data.symbol}</p>
-              )}
-            </div>
-          </div>
+          <VolatilityTab symbol={data.symbol} />
         )}
         {activeTab === 'fundamentals' && (
           <FundamentalsTab data={data} />
