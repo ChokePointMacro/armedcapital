@@ -4,7 +4,6 @@ import { safeAuth } from '@/lib/authHelper';
 import {
   fetchAllEnrichedData, enrichedDataToPromptBlock,
   fetchFredData, type FredData,
-  fetchFinnhubData, fetchFearGreedIndex, fetchCoinGeckoData,
 } from '@/lib/enrichedData';
 
 // Force dynamic rendering — this route fetches many external APIs at runtime
