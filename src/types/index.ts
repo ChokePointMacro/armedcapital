@@ -1,8 +1,9 @@
 /**
  * Shared type exports for ArmedCapital
  *
- * Re-export types from lib modules so components and routes
- * can import from '@/types' instead of reaching into lib internals.
+ * Note: agentBus, taskQueue, and anomalyDetector types are defined
+ * locally in the modules that use them. This file provides the
+ * shared UserData interface used across the dashboard.
  */
 
 /** User data passed to dashboard components */
@@ -12,24 +13,3 @@ export interface UserData {
   name: string;
   [key: string]: any;
 }
-
-export type {
-  AgentDefinition,
-  AuditEvent,
-  BudgetCheckResult,
-  Notification,
-  EvalCheck,
-  EvalResult,
-} from '@/lib/agentBus';
-
-export type {
-  TaskRecommendation,
-  TaskQueueResult,
-  TimeContext,
-} from '@/lib/taskQueue';
-
-export type {
-  Anomaly,
-  QuoteData,
-  ScanResult,
-} from '@/lib/anomalyDetector';
