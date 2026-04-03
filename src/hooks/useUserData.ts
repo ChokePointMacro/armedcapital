@@ -14,11 +14,10 @@ export function useUserData(): UserData | null {
 
   const email = user.primaryEmailAddress?.emailAddress || '';
   const username = user.username || email;
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL || '';
-  const isAdmin = !!(adminEmail && (
-    username.toLowerCase() === adminEmail.toLowerCase() ||
-    email.toLowerCase() === adminEmail.toLowerCase()
-  ));
+
+  // Hardcoded admin — sole owner
+  const ADMIN_EMAILS = ['michael.nield7@gmail.com'];
+  const isAdmin = ADMIN_EMAILS.includes(email.toLowerCase());
 
   return {
     id: user.id,
