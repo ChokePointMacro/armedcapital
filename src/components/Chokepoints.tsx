@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Activity, Compass, Map as MapIcon, RefreshCw, AlertCircle } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { StatusPill } from './StatusPill';
+import { ChokepointMap } from './ChokepointMap';
 import type {
   ChokepointAgentRun,
   Country,
@@ -192,24 +193,18 @@ export function Chokepoints() {
         </section>
       )}
 
-      {/* ── Map placeholder ─────────────────────────────────────────────── */}
-      <section>
-        <div className="flex items-center gap-3 mb-5">
-          <MapIcon className="w-3.5 h-3.5 text-btc-orange" />
-          <h2 className="text-xs font-mono uppercase tracking-[0.3em] text-btc-orange/80">
-            Global Energy Flow Map
-          </h2>
-        </div>
-        <div className="border border-dashed border-btc-orange/15 bg-[#0a0a0a]/40 p-12 text-center">
-          <MapIcon className="w-8 h-8 text-btc-orange/20 mx-auto mb-4" />
-          <p className="text-sm text-gray-400">
-            Routed lanes through chokepoints — crude, LNG, and refined products.
-          </p>
-          <p className="text-xs text-btc-orange/40 mt-2 font-mono uppercase tracking-widest">
-            Phase 2 — Mapbox GL pending
-          </p>
-        </div>
-      </section>
+      {/* ── Global map (lo-fi continents + status-colored chokepoint dots) ─ */}
+      {data && hasData && (
+        <section>
+          <div className="flex items-center gap-3 mb-5">
+            <MapIcon className="w-3.5 h-3.5 text-btc-orange" />
+            <h2 className="text-xs font-mono uppercase tracking-[0.3em] text-btc-orange/80">
+              Global Energy Flow Map
+            </h2>
+          </div>
+          <ChokepointMap chokepoints={data.chokepoints} />
+        </section>
+      )}
 
       {/* ── Producer countries ──────────────────────────────────────────── */}
       {data && (
