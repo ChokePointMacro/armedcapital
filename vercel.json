@@ -3,6 +3,10 @@
     {
       "path": "/api/cron",
       "schedule": "0 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/chokepoint-agent",
+      "schedule": "0 6 * * *"
     }
   ]
 }

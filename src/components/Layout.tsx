@@ -26,6 +26,7 @@ const NAV_ITEMS: { to: string; label: string; admin?: boolean }[] = [
   { to: '/tradingbot', label: 'TradingBot', admin: true },
   { to: '/org', label: 'Org' },
   { to: '/traffic', label: 'Traffic', admin: true },
+  { to: '/chokepoints', label: 'Chokepoints' },
   { to: '/operations', label: 'Operations', admin: true },
 ];
 
