@@ -19,19 +19,22 @@ export async function runChokepointAgent(): Promise<AgentRunResult> {
   const anomalies = await detectFlowAnomalies();
 
   // 2. Recent signals (last 24h) from connected data sources, grouped per chokepoint.
+  // Fail-soft: if the chokepoint_signals table doesn't exist yet (operator
+  // hasn't run the delta SQL), proceed with an empty signal set rather than
+  // breaking the whole agent run.
   const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
-  const { data: signalRows, error: sigErr } = await sb
+  const sigQuery = await sb
     .from('chokepoint_signals')
     .select('*')
     .gte('ts', since)
-    .order('ts', { ascending: false });
-  if (sigErr) throw new Error(`signal query failed: ${sigErr.message}`);
+    .order('ts', { ascending: false })
+    .then((r) => r, () => ({ data: null, error: { message: 'chokepoint_signals unavailable' } } as const));
 
   const signalsByCp: Record<string, ChokepointSignal[]> = {};
-  for (const s of (signalRows ?? []) as ChokepointSignal[]) {
+  for (const s of (sigQuery.data ?? []) as ChokepointSignal[]) {
     (signalsByCp[s.chokepoint_id] ??= []).push(s);
   }
-  const totalSignals = (signalRows ?? []).length;
+  const totalSignals = (sigQuery.data ?? []).length;
 
   // 3. Synthesize (deterministic stub for now)
   const { synthesis_md, model_used, tokens_in, tokens_out } = synthesize(anomalies, signalsByCp);

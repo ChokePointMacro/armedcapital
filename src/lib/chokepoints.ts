@@ -58,12 +58,16 @@ export async function getChokepoints(): Promise<Chokepoint[]> {
 export async function getChokepointsWithStatus(): Promise<ChokepointWithStatus[]> {
   const sb = createServerSupabase();
 
+  // The first three queries are required — if they fail, the page can't render.
+  // The last two (data_sources, signals) are optional — if those tables don't
+  // exist yet (operator hasn't run the delta SQL), we degrade to zeros instead
+  // of blanking the whole dashboard.
   const [
     { data: chokepoints, error: cpErr },
     { data: statuses,    error: stErr },
     { data: latestRun,   error: rnErr },
-    { data: sources,     error: dsErr },
-    { data: signals,     error: sgErr },
+    sourcesResult,
+    signalsResult,
   ] = await Promise.all([
     sb.from('chokepoints').select('*').order('name'),
     sb.from('chokepoint_status')
@@ -74,17 +78,20 @@ export async function getChokepointsWithStatus(): Promise<ChokepointWithStatus[]
       .order('ts', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    sb.from('chokepoint_data_sources').select('chokepoint_id, enabled'),
+    sb.from('chokepoint_data_sources').select('chokepoint_id, enabled')
+      .then((r) => r, () => ({ data: null, error: { message: 'unavailable' } } as const)),
     sb.from('chokepoint_signals')
       .select('chokepoint_id')
-      .gte('ts', new Date(Date.now() - 24 * 3_600_000).toISOString()),
+      .gte('ts', new Date(Date.now() - 24 * 3_600_000).toISOString())
+      .then((r) => r, () => ({ data: null, error: { message: 'unavailable' } } as const)),
   ]);
 
   if (cpErr) throw new Error(cpErr.message);
   if (stErr) throw new Error(stErr.message);
   if (rnErr) throw new Error(rnErr.message);
-  if (dsErr) throw new Error(dsErr.message);
-  if (sgErr) throw new Error(sgErr.message);
+  // sources / signals errors are swallowed — table may not exist yet.
+  const sources = sourcesResult.data ?? [];
+  const signals = signalsResult.data ?? [];
 
   const agentStale = isStale((latestRun as { ts?: string } | null)?.ts ?? null);
 
