@@ -39,6 +39,25 @@ function emit(entry: LogEntry) {
 
   if (level >= LOG_LEVELS.error) {
     console.error(output);
+    // Forward errors to Sentry. Dynamic import + DSN gate matches the pattern
+    // used by sentry.{client,server,edge}.config.ts so we degrade safely when
+    // Sentry isn't configured.
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN || process.env.SENTRY_DSN) {
+      import('@sentry/nextjs').then((Sentry) => {
+        const err = new Error(`log:${entry.msg}`);
+        err.name = entry.level === 'fatal' ? 'FatalLog' : 'ErrorLog';
+        Sentry.captureException(err, {
+          level: entry.level === 'fatal' ? 'fatal' : 'error',
+          tags: {
+            log_level: entry.level,
+            route: (entry.route as string) ?? 'unknown',
+          },
+          extra: { ...entry },
+        });
+      }).catch(() => {
+        // Sentry import failed — already logged the error to stdout above.
+      });
+    }
   } else if (level >= LOG_LEVELS.warn) {
     console.warn(output);
   } else {
