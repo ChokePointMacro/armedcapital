@@ -175,3 +175,49 @@ ON CONFLICT (iso3) DO UPDATE SET
   oil_producer_tier = EXCLUDED.oil_producer_tier,
   lng_producer_tier = EXCLUDED.lng_producer_tier,
   updated_at = NOW();
+
+-- Per-chokepoint data sources (RSS feeds, news queries, X accounts, webhooks).
+-- The agent reads from chokepoint_signals (populated by polling these sources)
+-- when computing status. Polling is wired in a follow-up; this lands the
+-- structure so the UI can register sources today.
+CREATE TABLE IF NOT EXISTS chokepoint_data_sources (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  chokepoint_id TEXT NOT NULL REFERENCES chokepoints(id) ON DELETE CASCADE,
+  type TEXT NOT NULL
+    CHECK (type IN ('rss','news_query','twitter_account','manual_url','webhook')),
+  name TEXT NOT NULL,
+  url TEXT,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  last_polled_at TIMESTAMPTZ,
+  last_signal_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Signals collected from data sources (or inserted manually for testing).
+-- Severity drives the pill: any 'high' → red, any 'medium' → yellow,
+-- 'low' is informational only.
+CREATE TABLE IF NOT EXISTS chokepoint_signals (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  chokepoint_id TEXT NOT NULL REFERENCES chokepoints(id) ON DELETE CASCADE,
+  data_source_id UUID REFERENCES chokepoint_data_sources(id) ON DELETE SET NULL,
+  ts TIMESTAMPTZ DEFAULT NOW(),
+  severity TEXT NOT NULL CHECK (severity IN ('low','medium','high')),
+  headline TEXT NOT NULL,
+  url TEXT,
+  body TEXT,
+  raw JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chokepoint_data_sources_cp ON chokepoint_data_sources(chokepoint_id);
+CREATE INDEX IF NOT EXISTS idx_chokepoint_data_sources_enabled ON chokepoint_data_sources(enabled) WHERE enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_chokepoint_signals_cp_ts ON chokepoint_signals(chokepoint_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_chokepoint_signals_severity ON chokepoint_signals(severity, ts DESC);
+
+ALTER TABLE chokepoint_data_sources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chokepoint_signals      ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all" ON chokepoint_data_sources FOR ALL USING (true);
+CREATE POLICY "Allow all" ON chokepoint_signals      FOR ALL USING (true);

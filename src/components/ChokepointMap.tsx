@@ -31,10 +31,11 @@ const CONTINENTS: { name: string; d: string }[] = [
     d: 'M 0,344 L 800,344 L 800,389 L 0,389 Z' },
 ];
 
-const STATUS_COLORS: Record<StatusPillValue, { fill: string; glow: string }> = {
-  green:  { fill: '#34d399', glow: 'rgba(52,211,153,0.55)' },
-  yellow: { fill: '#fbbf24', glow: 'rgba(251,191,36,0.55)' },
-  red:    { fill: '#fb7185', glow: 'rgba(251,113,133,0.55)' },
+const STATUS_COLORS: Record<StatusPillValue, { fill: string; glow: string; pulse: boolean }> = {
+  green:   { fill: '#34d399', glow: 'rgba(52,211,153,0.55)',  pulse: true },
+  yellow:  { fill: '#fbbf24', glow: 'rgba(251,191,36,0.55)',  pulse: true },
+  red:     { fill: '#fb7185', glow: 'rgba(251,113,133,0.55)', pulse: true },
+  unknown: { fill: '#71717a', glow: 'rgba(113,113,122,0.4)',  pulse: false },
 };
 
 export interface ChokepointMapPoint {
@@ -137,11 +138,25 @@ export function ChokepointMap({
                 onMouseLeave={() => setHoveredId(null)}
                 style={{ cursor: 'pointer' }}
               >
-                {/* Pulsing outer ring */}
-                <circle cx={cx} cy={cy} r="6" fill={c.fill} fillOpacity="0.35">
-                  <animate attributeName="r"            values="5;14;5"     dur="2.8s" repeatCount="indefinite" />
-                  <animate attributeName="fill-opacity" values="0.35;0;0.35" dur="2.8s" repeatCount="indefinite" />
-                </circle>
+                {/* Pulsing outer ring (only for live statuses) */}
+                {c.pulse && (
+                  <circle cx={cx} cy={cy} r="6" fill={c.fill} fillOpacity="0.35">
+                    <animate attributeName="r"            values="5;14;5"     dur="2.8s" repeatCount="indefinite" />
+                    <animate attributeName="fill-opacity" values="0.35;0;0.35" dur="2.8s" repeatCount="indefinite" />
+                  </circle>
+                )}
+
+                {/* Dashed ring for 'unknown' — visually different from a live state */}
+                {!c.pulse && (
+                  <circle
+                    cx={cx} cy={cy} r="9"
+                    fill="none"
+                    stroke={c.fill}
+                    strokeOpacity="0.5"
+                    strokeWidth="1"
+                    strokeDasharray="2,2"
+                  />
+                )}
 
                 {/* Inner dot */}
                 <circle
@@ -151,7 +166,7 @@ export function ChokepointMap({
                   fill={c.fill}
                   stroke="#0a0a0a"
                   strokeWidth="1.2"
-                  style={{ filter: `drop-shadow(0 0 6px ${c.glow})` }}
+                  style={{ filter: c.pulse ? `drop-shadow(0 0 6px ${c.glow})` : 'none' }}
                 />
 
                 {/* Label */}

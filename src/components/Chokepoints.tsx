@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Activity, Compass, Map as MapIcon, RefreshCw, AlertCircle } from 'lucide-react';
+import {
+  Activity, Compass, Map as MapIcon, RefreshCw, AlertCircle, Settings, Radio,
+} from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { StatusPill } from './StatusPill';
 import { ChokepointMap } from './ChokepointMap';
+import { ChokepointSourcesModal } from './ChokepointSourcesModal';
 import type {
   ChokepointAgentRun,
   Country,
@@ -24,6 +27,8 @@ interface ChokepointWithStatus {
   latest_status: StatusPillValue;
   last_updated: string | null;
   headline_signal: string | null;
+  data_source_count: number;
+  recent_signal_count: number;
 }
 
 interface DashboardResponse {
@@ -44,6 +49,15 @@ function formatTimestamp(ts: string | null): string {
     timeZone: 'UTC',
     timeZoneName: 'short',
   });
+}
+
+function formatRelativeAge(ts: string | null): string {
+  if (!ts) return 'never';
+  const ageMs = Date.now() - new Date(ts).getTime();
+  const ageH = ageMs / 3_600_000;
+  if (ageH < 1) return `${Math.round(ageMs / 60_000)}m ago`;
+  if (ageH < 48) return `${Math.round(ageH)}h ago`;
+  return `${Math.round(ageH / 24)}d ago`;
 }
 
 function CountryRow({ country }: { country: Country }) {
@@ -75,15 +89,14 @@ export function Chokepoints() {
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeCp, setActiveCp] = useState<ChokepointWithStatus | null>(null);
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
       const res = await apiFetch('/api/chokepoints');
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as DashboardResponse;
       setData(json);
     } catch (err) {
@@ -96,6 +109,8 @@ export function Chokepoints() {
   useEffect(() => { void load(); }, []);
 
   const hasData = !!data && data.chokepoints.length > 0;
+  const agentRunAge = data?.latest_run?.ts ?? null;
+  const agentStale = !agentRunAge || (Date.now() - new Date(agentRunAge).getTime()) / 3_600_000 > 36;
 
   return (
     <div className="space-y-12">
@@ -116,8 +131,8 @@ export function Chokepoints() {
           </h1>
           <p className="text-lg text-gray-400 leading-relaxed max-w-xl">
             Daily monitoring of the seven maritime chokepoints that route the world&apos;s
-            crude oil and LNG. Status pills combine flow anomalies, geopolitical signal,
-            and sanctions deltas against a 90-day rolling baseline.
+            crude oil and LNG. Status pills combine flow anomalies and signals from
+            connected data sources against a 90-day rolling baseline.
           </p>
         </div>
       </section>
@@ -136,8 +151,8 @@ export function Chokepoints() {
           <div>
             <p className="text-sm text-rose-300 font-mono">Failed to load: {error}</p>
             <p className="text-xs text-gray-500 mt-1">
-              The schema additions in <code>supabase-schema.sql</code> may not have been
-              run yet. Open Supabase SQL Editor and re-run the file end-to-end.
+              The schema additions in <code>scripts/chokepoint-watch-schema.sql</code> may
+              not have been run yet. Open Supabase SQL Editor and re-run the file end-to-end.
             </p>
             <button
               onClick={() => void load()}
@@ -145,6 +160,23 @@ export function Chokepoints() {
             >
               <RefreshCw className="w-3 h-3" /> Retry
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Stale-agent banner ──────────────────────────────────────────── */}
+      {data && hasData && agentStale && (
+        <div className="flex items-center gap-3 px-4 py-3 border border-zinc-500/30 bg-zinc-500/5">
+          <Radio className="w-4 h-4 text-zinc-400 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-xs text-zinc-300 font-mono uppercase tracking-widest">
+              Agent has not run in the last 36 hours · pills show NO SIGNAL until next cron
+            </p>
+            <p className="text-[10px] text-gray-500 mt-1">
+              Last run: {agentRunAge ? formatRelativeAge(agentRunAge) : 'never'}.
+              Trigger manually:{' '}
+              <code className="text-btc-orange/70">curl -H &quot;Authorization: Bearer $CRON_SECRET&quot; /api/cron/chokepoint-agent</code>
+            </p>
           </div>
         </div>
       )}
@@ -168,32 +200,59 @@ export function Chokepoints() {
             {data.chokepoints.map((cp) => (
               <div
                 key={cp.id}
-                className="border border-btc-orange/15 bg-[#0a0a0a]/60 p-5 hover:border-btc-orange/40 transition-colors"
+                className="border border-btc-orange/15 bg-[#0a0a0a]/60 p-5 hover:border-btc-orange/40 transition-colors flex flex-col"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="text-lg font-serif italic text-white">{cp.name}</h3>
+                <div className="flex items-start justify-between mb-3 gap-2">
+                  <h3 className="text-lg font-serif italic text-white leading-tight">{cp.name}</h3>
                   <StatusPill status={cp.latest_status} />
                 </div>
                 <p className="font-mono text-[10px] uppercase tracking-widest text-btc-orange/40 mb-3">
                   {cp.center_lat.toFixed(2)}°N · {cp.center_lng.toFixed(2)}°E
                 </p>
+
                 {cp.headline_signal ? (
-                  <p className="text-xs text-gray-400 leading-relaxed line-clamp-3">
+                  <p className="text-xs text-gray-400 leading-relaxed line-clamp-3 flex-1">
                     {cp.headline_signal}
                   </p>
+                ) : cp.latest_status === 'unknown' ? (
+                  <p className="text-xs text-gray-600 italic flex-1">
+                    No signal — connect a data source to start monitoring.
+                  </p>
                 ) : (
-                  <p className="text-xs text-gray-600 italic">No signal anomalies in window.</p>
+                  <p className="text-xs text-gray-600 italic flex-1">
+                    No anomalies in window.
+                  </p>
                 )}
-                <p className="text-[10px] text-gray-600 font-mono mt-4">
-                  {formatTimestamp(cp.last_updated)}
-                </p>
+
+                {/* Sources / signals counts */}
+                <div className="flex items-center gap-3 mt-4 text-[10px] font-mono">
+                  <span className="text-gray-500">
+                    <span className="text-gray-300">{cp.data_source_count}</span>{' '}
+                    source{cp.data_source_count === 1 ? '' : 's'}
+                  </span>
+                  <span className="text-gray-500">
+                    <span className="text-gray-300">{cp.recent_signal_count}</span>{' '}
+                    signal{cp.recent_signal_count === 1 ? '' : 's'} 24h
+                  </span>
+                  <span className="text-gray-600 ml-auto">
+                    {formatRelativeAge(cp.last_updated)}
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setActiveCp(cp)}
+                  className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 border border-btc-orange/30 text-btc-orange text-[10px] font-mono uppercase tracking-widest hover:bg-btc-orange/10 transition-colors"
+                >
+                  <Settings size={11} />
+                  Manage sources
+                </button>
               </div>
             ))}
           </div>
         </section>
       )}
 
-      {/* ── Global map (lo-fi continents + status-colored chokepoint dots) ─ */}
+      {/* ── Global map ──────────────────────────────────────────────────── */}
       {data && hasData && (
         <section>
           <div className="flex items-center gap-3 mb-5">
@@ -262,6 +321,17 @@ export function Chokepoints() {
           Subscribe to brief
         </Link>
       </section>
+
+      {/* ── Sources modal ───────────────────────────────────────────────── */}
+      {activeCp && (
+        <ChokepointSourcesModal
+          open={true}
+          onClose={() => setActiveCp(null)}
+          chokepointId={activeCp.id}
+          chokepointName={activeCp.name}
+          onChange={() => void load()}
+        />
+      )}
     </div>
   );
 }

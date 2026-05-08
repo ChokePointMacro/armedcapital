@@ -1,4 +1,4 @@
-import type { AgentAnomaly, ChokepointId } from '@/types';
+import type { AgentAnomaly, ChokepointId, ChokepointSignal, StoredStatus } from '@/types';
 
 // Deterministic stub synthesis. Phase 4 swaps this for a call to
 // src/services/aiService.ts → generateReportWithFallback() with the
@@ -21,11 +21,16 @@ const CHOKEPOINT_NAMES: Record<ChokepointId, string> = {
   cape_of_good_hope: 'Cape of Good Hope',
 };
 
-export function synthesize(anomalies: AgentAnomaly[]): SynthesisResult {
-  if (anomalies.length === 0) {
+export function synthesize(
+  anomalies: AgentAnomaly[],
+  signalsByChokepoint: Record<string, ChokepointSignal[]> = {},
+): SynthesisResult {
+  const totalSignals = Object.values(signalsByChokepoint).reduce((n, arr) => n + arr.length, 0);
+
+  if (anomalies.length === 0 && totalSignals === 0) {
     return {
       synthesis_md:
-        'No flow anomalies detected against the 90-day baseline. ' +
+        'No flow anomalies detected against the 90-day baseline and no recent signals from connected data sources. ' +
         'All seven monitored chokepoints are within structural norms. ' +
         '_Tension Agent stub — Phase 4 swaps in aiService.generateReportWithFallback._',
       model_used: 'stub-deterministic',
@@ -41,19 +46,30 @@ export function synthesize(anomalies: AgentAnomaly[]): SynthesisResult {
     byChokepoint.get(key)!.push(a);
   }
 
-  const high = anomalies.filter((a) => a.severity === 'high').length;
+  const high   = anomalies.filter((a) => a.severity === 'high').length;
   const medium = anomalies.filter((a) => a.severity === 'medium').length;
 
   const parts: string[] = [];
-  parts.push(`**${anomalies.length} flow anomal${anomalies.length === 1 ? 'y' : 'ies'} detected** against the 90-day baseline (${high} high, ${medium} medium severity).`);
+  if (anomalies.length > 0) {
+    parts.push(`**${anomalies.length} flow anomal${anomalies.length === 1 ? 'y' : 'ies'} detected** against the 90-day baseline (${high} high, ${medium} medium severity).`);
+  }
+  if (totalSignals > 0) {
+    parts.push(`**${totalSignals} recent signal${totalSignals === 1 ? '' : 's'}** from connected data sources in the last 24h.`);
+  }
 
   for (const [cp, items] of Array.from(byChokepoint.entries())) {
     const label = cp === 'unmapped' ? 'Unmapped origins' : CHOKEPOINT_NAMES[cp as ChokepointId] ?? cp;
-    parts.push(`\n**${label}** — ${items.length} signal${items.length === 1 ? '' : 's'}:`);
-    for (const a of items.slice(0, 3)) {
-      parts.push(`- ${a.summary}`);
-    }
+    parts.push(`\n**${label}** — ${items.length} flow signal${items.length === 1 ? '' : 's'}:`);
+    for (const a of items.slice(0, 3)) parts.push(`- ${a.summary}`);
     if (items.length > 3) parts.push(`- _…and ${items.length - 3} more_`);
+  }
+
+  for (const [cpId, sigs] of Object.entries(signalsByChokepoint)) {
+    if (sigs.length === 0) continue;
+    const label = CHOKEPOINT_NAMES[cpId as ChokepointId] ?? cpId;
+    parts.push(`\n**${label}** — ${sigs.length} data-source signal${sigs.length === 1 ? '' : 's'}:`);
+    for (const s of sigs.slice(0, 3)) parts.push(`- [${s.severity.toUpperCase()}] ${s.headline}`);
+    if (sigs.length > 3) parts.push(`- _…and ${sigs.length - 3} more_`);
   }
 
   parts.push('\n_Tension Agent stub — Phase 4 swaps in aiService.generateReportWithFallback._');
@@ -66,18 +82,46 @@ export function synthesize(anomalies: AgentAnomaly[]): SynthesisResult {
   };
 }
 
-// Per-chokepoint pill rule: 3+ anomalies or any 'high' → red,
-// 1–2 → yellow, 0 → green.
+// Per-chokepoint pill rule:
+//   - any 'high' (anomaly OR signal) → red
+//   - 3+ flow anomalies → red
+//   - any 'medium' OR 1-2 anomalies OR 1+ low-severity signal → yellow
+//   - nothing → green
+//
+// Returns only stored states; the read-time UI maps "no row at all" to 'unknown'.
 export function statusForChokepoint(
   cpId: ChokepointId,
   anomalies: AgentAnomaly[],
-): { status: 'green' | 'yellow' | 'red'; signal: string | null } {
-  const relevant = anomalies.filter((a) => a.chokepoint_id === cpId);
-  if (relevant.length === 0) return { status: 'green', signal: null };
+  signals: ChokepointSignal[] = [],
+): { status: StoredStatus; signal: string | null } {
+  const relevantAnoms = anomalies.filter((a) => a.chokepoint_id === cpId);
 
-  const hasHigh = relevant.some((a) => a.severity === 'high');
-  if (hasHigh || relevant.length >= 3) {
-    return { status: 'red', signal: relevant[0].summary };
+  const hasHigh =
+    relevantAnoms.some((a) => a.severity === 'high') ||
+    signals.some((s) => s.severity === 'high');
+  if (hasHigh) {
+    const summary =
+      signals.find((s) => s.severity === 'high')?.headline ??
+      relevantAnoms[0]?.summary ??
+      null;
+    return { status: 'red', signal: summary };
   }
-  return { status: 'yellow', signal: relevant[0].summary };
+
+  if (relevantAnoms.length >= 3) {
+    return { status: 'red', signal: relevantAnoms[0].summary };
+  }
+
+  const hasMedium =
+    relevantAnoms.some((a) => a.severity === 'medium') ||
+    signals.some((s) => s.severity === 'medium');
+  if (hasMedium || relevantAnoms.length > 0 || signals.length > 0) {
+    const summary =
+      signals.find((s) => s.severity === 'medium')?.headline ??
+      relevantAnoms[0]?.summary ??
+      signals[0]?.headline ??
+      null;
+    return { status: 'yellow', signal: summary };
+  }
+
+  return { status: 'green', signal: null };
 }

@@ -129,17 +129,57 @@ export interface ChokepointAgentRun {
   created_at: string;
 }
 
-export type StatusPill = 'green' | 'yellow' | 'red';
+// 'unknown' is the honest default when we have no data — no agent run yet,
+// or the latest run is stale. Stored states are only green/yellow/red;
+// 'unknown' is computed at read time and never persisted.
+export type StatusPill = 'green' | 'yellow' | 'red' | 'unknown';
+export type StoredStatus = 'green' | 'yellow' | 'red';
 
 export interface ChokepointStatus {
   id: string;
   chokepoint_id: ChokepointId;
   ts: string;
-  status: StatusPill;
+  status: StoredStatus;
   headline_signal: string | null;
   flow_delta_pct: number | null;
   event_count_24h: number | null;
   sanctions_delta_24h: number | null;
   agent_run_id: string | null;
+  created_at: string;
+}
+
+export type DataSourceType =
+  | 'rss'
+  | 'news_query'
+  | 'twitter_account'
+  | 'manual_url'
+  | 'webhook';
+
+export interface ChokepointDataSource {
+  id: string;
+  chokepoint_id: ChokepointId;
+  type: DataSourceType;
+  name: string;
+  url: string | null;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  last_polled_at: string | null;
+  last_signal_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SignalSeverity = 'low' | 'medium' | 'high';
+
+export interface ChokepointSignal {
+  id: string;
+  chokepoint_id: ChokepointId;
+  data_source_id: string | null;
+  ts: string;
+  severity: SignalSeverity;
+  headline: string;
+  url: string | null;
+  body: string | null;
+  raw: Record<string, unknown> | null;
   created_at: string;
 }
