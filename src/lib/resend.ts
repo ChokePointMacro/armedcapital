@@ -55,7 +55,7 @@ export async function sendEmail(args: SendEmailArgs) {
     subject: args.subject,
     html,
     text: args.text,
-    replyTo: args.replyTo,
+    reply_to: args.replyTo,
     tags: args.tags,
   });
 }
